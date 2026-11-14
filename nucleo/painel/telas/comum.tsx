@@ -20,17 +20,29 @@ export interface Carga<T> {
   recarregar(): void;
 }
 
+const ultimasLeituras = new Map<string, unknown>();
+
+/** Guarda a última leitura boa de uma chave: a tela que volta a mostra no primeiro quadro, sem piscar vazia. */
+export function guardarLeitura(chave: string, dados: unknown): void {
+  ultimasLeituras.set(chave, dados);
+}
+
+function ultimaLeitura<T>(chave: string): T | null {
+  return (ultimasLeituras.get(chave) as T | undefined) ?? null;
+}
+
 /**
  * Carrega pela API e recarrega quando `gatilho` muda (o `event: tarefas` do SSE) ou por `recarregar`.
  * Resposta que chega depois de outra mais nova é descartada. Os dados de outra `chave` não aparecem.
+ * Enquanto lê, mostra a última leitura da mesma chave, de antes de a tela sair.
  */
 export function useCarga<T>(chave: string, carregar: () => Promise<Resposta<T>>, gatilho: string | number): Carga<T> {
-  const [carga, setCarga] = useState<{ chave: string; dados: T | null; erro: ErroOperacao | null; carregando: boolean }>({
+  const [carga, setCarga] = useState<{ chave: string; dados: T | null; erro: ErroOperacao | null; carregando: boolean }>(() => ({
     chave,
-    dados: null,
+    dados: ultimaLeitura<T>(chave),
     erro: null,
     carregando: true,
-  });
+  }));
   const [rodada, setRodada] = useState(0);
 
   useEffect(() => {
@@ -38,6 +50,7 @@ export function useCarga<T>(chave: string, carregar: () => Promise<Resposta<T>>,
     setCarga((atual) => ({ ...atual, carregando: true }));
     void carregar().then((resposta) => {
       if (!valendo) return;
+      if (resposta.ok) guardarLeitura(chave, resposta.dados);
       setCarga((atual) => ({
         chave,
         dados: resposta.ok ? resposta.dados : atual.chave === chave ? atual.dados : null,
@@ -53,7 +66,7 @@ export function useCarga<T>(chave: string, carregar: () => Promise<Resposta<T>>,
 
   const recarregar = useCallback(() => setRodada((n) => n + 1), []);
   const daChave = carga.chave === chave;
-  return { dados: daChave ? carga.dados : null, erro: daChave ? carga.erro : null, carregando: carga.carregando || !daChave, recarregar };
+  return { dados: daChave ? carga.dados : ultimaLeitura<T>(chave), erro: daChave ? carga.erro : null, carregando: carga.carregando || !daChave, recarregar };
 }
 
 export interface Executor {

@@ -117,7 +117,7 @@ function LinhaDaLista({ tarefa, hoje }: { tarefa: Tarefa; hoje: Dia }) {
 
 export function Tarefas({ mudancas, nova }: { mudancas: number; nova: boolean }) {
   const [estado, setEstado] = useState<EstadoDaTarefa>("aberta");
-  const carga = useCarga(estado, () => api.listar(estado), mudancas);
+  const carga = useCarga(`tarefas:${estado}`, () => api.listar(estado), mudancas);
   const executor = useExecutor(carga.recarregar);
   const hoje = diaEm(new Date());
   const filtro = FILTROS.find((f) => f.estado === estado)!;

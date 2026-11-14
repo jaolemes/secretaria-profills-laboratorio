@@ -78,7 +78,7 @@ function Anotar({ id, executor }: { id: string; executor: Executor }) {
 }
 
 export function DetalheDaTarefa({ id, mudancas }: { id: string; mudancas: number }) {
-  const carga = useCarga(id, () => api.ver(id), mudancas);
+  const carga = useCarga(`tarefa:${id}`, () => api.ver(id), mudancas);
   const executor = useExecutor(carga.recarregar);
   const hoje: Dia = diaEm(new Date());
   const dados = carga.dados;

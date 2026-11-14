@@ -362,6 +362,8 @@ export interface MeuDia extends BlocosDoCrm, BlocosDeConversas {
   /** Atrasadas e de hoje, pelo prazo. */
   readonly fazer_hoje: readonly TarefaDoDia[];
   readonly sem_data: readonly Tarefa[];
+  /** Quantas tarefas estão abertas, com qualquer prazo. A lateral do painel mostra o número em Tarefas. */
+  readonly tarefas_abertas: number;
   /** Os cartões da fila de aprovação que esperam o vendedor (`rascunho`, `falhou` e `falhou_incerto`), do mais antigo para o mais novo. */
   readonly aprovar: readonly ResumoDaEscrita[];
   readonly fontes: readonly IdadeDaFonte[];
@@ -414,8 +416,10 @@ export function montarMeuDia(
 ): MeuDia {
   const fazerHoje: TarefaDoDia[] = [];
   const semData: Tarefa[] = [];
+  let tarefasAbertas = 0;
   for (const tarefa of ordenar(abertas)) {
     if (tarefa.estado !== "aberta") continue;
+    tarefasAbertas += 1;
     const onde = situacao(tarefa.venceEm, hoje);
     if (onde === "atrasada" || onde === "hoje") fazerHoje.push({ ...tarefa, situacao: onde });
     else if (onde === "sem_data") semData.push(tarefa);
@@ -432,6 +436,7 @@ export function montarMeuDia(
     hoje,
     fazer_hoje: fazerHoje,
     sem_data: semData,
+    tarefas_abertas: tarefasAbertas,
     aprovar,
     fontes,
     ...montarBlocosDoCrm(leituras, conectores.crm, hoje, ignorados),

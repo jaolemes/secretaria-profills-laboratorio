@@ -1,89 +1,317 @@
-import { CalendarCheck, ListTodo, PanelLeftClose, PanelLeftOpen, PlugZap, type LucideIcon } from "lucide-react";
-import { useState } from "react";
+import {
+  Calendar,
+  CalendarCheck,
+  ChevronUp,
+  CircleCheck,
+  FileText,
+  Hourglass,
+  Inbox,
+  ListTodo,
+  Menu,
+  MessageCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PlugZap,
+  UserX,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { hashDaRota, type Secao } from "./rota";
+import type { Tom } from "./descrever";
+import type { ConexoesDaLateral, LinhaDoMenu, ModeloDoMenu } from "./lateral";
+import type { IdDoBloco } from "./meu-dia";
+import { hashDaRota } from "./rota";
 
-const ITENS: readonly { readonly secao: Secao; readonly nome: string; readonly Icone: LucideIcon }[] = [
-  { secao: "meu-dia", nome: "Meu dia", Icone: CalendarCheck },
-  { secao: "tarefas", nome: "Tarefas", Icone: ListTodo },
-  { secao: "conexoes", nome: "Conexões", Icone: PlugZap },
-];
-
-export const NOMES_DAS_SECOES: { readonly [S in Secao]: string } = { "meu-dia": "Meu dia", tarefas: "Tarefas", conexoes: "Conexões" };
+const ICONES_DOS_BLOCOS: { readonly [B in IdDoBloco]: LucideIcon } = {
+  "fazer-hoje": CircleCheck,
+  "sem-data": Calendar,
+  aprovar: Inbox,
+  responder: MessageCircle,
+  propostas: FileText,
+  "esperando-cliente": Hourglass,
+  "sem-atendimento": UserX,
+};
 
 const CHAVE_RECOLHIDA = "secretaria.navegacao-recolhida";
+const CHAVE_FONTES_ABERTAS = "secretaria.lateral-fontes-abertas";
 
-function lerRecolhida(): boolean {
+function lerLembrado(chave: string): boolean {
   try {
-    return localStorage.getItem(CHAVE_RECOLHIDA) === "1";
+    return localStorage.getItem(chave) === "1";
   } catch {
     return false;
   }
 }
 
-function gravarRecolhida(recolhida: boolean): void {
+function gravarLembrado(chave: string, valor: boolean): void {
   try {
-    localStorage.setItem(CHAVE_RECOLHIDA, recolhida ? "1" : "0");
+    localStorage.setItem(chave, valor ? "1" : "0");
   } catch {
     // Sem armazenamento a escolha vale só nesta aba.
   }
 }
 
-/** Lateral no computador, com o botão de recolher no cabeçalho; barra de baixo no celular. Sem barra no topo. */
-export function Navegacao({ atual }: { atual: Secao | null }) {
-  const [recolhida, setRecolhida] = useState(lerRecolhida);
-  const alternar = () => {
-    setRecolhida(!recolhida);
-    gravarRecolhida(!recolhida);
-  };
-  const rotuloDoBotao = recolhida ? "Abrir a lateral" : "Recolher a lateral";
+function useLembrado(chave: string): [boolean, () => void] {
+  const [valor, setValor] = useState(() => lerLembrado(chave));
+  return [
+    valor,
+    () => {
+      setValor(!valor);
+      gravarLembrado(chave, !valor);
+    },
+  ];
+}
 
+const TECLAS_DO_MENU = ["ArrowDown", "ArrowUp", "Home", "End"];
+
+/** Setas, Home e End andam pelos links e botões do menu, na ordem da tela. */
+function moverFoco(evento: KeyboardEvent<HTMLElement>): void {
+  if (!TECLAS_DO_MENU.includes(evento.key)) return;
+  const itens = [...evento.currentTarget.querySelectorAll<HTMLElement>("a[href], button:not(:disabled)")];
+  const atual = itens.indexOf(document.activeElement as HTMLElement);
+  if (atual < 0) return;
+  evento.preventDefault();
+  const destino = evento.key === "Home" ? 0 : evento.key === "End" ? itens.length - 1 : evento.key === "ArrowDown" ? Math.min(atual + 1, itens.length - 1) : Math.max(atual - 1, 0);
+  itens[destino]?.focus();
+}
+
+/** A dica própria da lateral recolhida: aparece no hover e no foco por teclado, nunca o `title` nativo. */
+function Dica({ texto, ativa, children }: { texto: string; ativa: boolean; children: ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      {ativa && <TooltipContent side="right">{texto}</TooltipContent>}
+    </Tooltip>
+  );
+}
+
+function LugarDoLogo() {
+  return (
+    <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-[7px] border border-dashed border-input text-[7px] font-semibold tracking-wide text-fraco uppercase">
+      logo
+    </span>
+  );
+}
+
+function Marca() {
+  return (
+    <span className="flex min-w-0 items-center gap-2.25">
+      <LugarDoLogo />
+      <span className="truncate text-[15px] font-semibold tracking-tight">Secretária</span>
+    </span>
+  );
+}
+
+const COR_DO_PONTO: { readonly [T in Tom]: string } = { ok: "bg-fraco", neutro: "bg-fraco", andamento: "bg-fraco", atencao: "bg-destaque" };
+
+function Ponto({ tom, className }: { tom: Tom; className?: string }) {
+  return <span aria-hidden className={cn("size-[7px] shrink-0 rounded-full", COR_DO_PONTO[tom], className)} />;
+}
+
+type Forma = "aba" | "grupo" | "bloco";
+
+interface PropsDoItem {
+  readonly linha: LinhaDoMenu;
+  readonly Icone: LucideIcon;
+  readonly forma: Forma;
+  readonly recolhida: boolean;
+  /** Na lateral a aba ativa se funde à Moldura; na gaveta do celular não há Moldura ao lado. */
+  readonly naGaveta: boolean;
+  readonly dentroDoGrupoAberto?: boolean;
+  readonly paiDoAtual?: boolean;
+}
+
+function ItemDoMenu({ linha, Icone, forma, recolhida, naGaveta, dentroDoGrupoAberto = false, paiDoAtual = false }: PropsDoItem) {
+  const { contagem, atual, quente } = linha;
+  const fundida = forma === "aba" && atual && !naGaveta;
+  return (
+    <Dica texto={linha.dica} ativa={recolhida}>
+      <a
+        href={hashDaRota(linha.destino)}
+        aria-current={atual ? "page" : undefined}
+        aria-label={[linha.nome, contagem?.falado, quente ? "precisa de atenção" : undefined].filter(Boolean).join(", ")}
+        className={cn(
+          "relative flex w-full items-center gap-2.5 rounded-md text-sm whitespace-nowrap text-muted-foreground transition-colors outline-none hover:bg-passar hover:text-foreground",
+          recolhida ? "h-10 justify-center" : "min-h-[34px] px-2.5",
+          forma === "bloco" && !recolhida && "min-h-[31px] pl-8 text-[13.5px]",
+          forma === "aba" && !naGaveta && "min-h-[38px] rounded-l-[10px] rounded-r-none border border-r-0 border-transparent",
+          dentroDoGrupoAberto && "hover:bg-passar-na-moldura",
+          paiDoAtual && "font-semibold text-foreground",
+          atual && !fundida && "bg-ativo font-semibold text-foreground shadow-[inset_0_0_0_1px_var(--ativo-borda)] hover:bg-ativo",
+          fundida && "z-[2] border-border bg-background font-semibold text-foreground hover:bg-background",
+        )}
+      >
+        <Icone aria-hidden className={cn("shrink-0", forma === "bloco" && !recolhida ? "size-3.5" : "size-4", atual && "text-foreground")} />
+        <span className={cn(recolhida ? "sr-only" : "min-w-0 flex-1 truncate")}>{linha.nome}</span>
+        {contagem !== null && (
+          <span
+            aria-hidden
+            className={cn(
+              "text-xs font-medium tabular-nums",
+              recolhida
+                ? "absolute top-0.5 right-1 grid h-4 min-w-[17px] place-items-center rounded-lg bg-accent px-1 text-[10.5px] text-foreground"
+                : contagem.apagado
+                  ? "text-fraco"
+                  : "text-muted-foreground",
+              atual && !recolhida && "text-foreground",
+              atual && recolhida && "bg-foreground text-sidebar",
+              recolhida && contagem.apagado && "hidden",
+            )}
+          >
+            {contagem.texto}
+          </span>
+        )}
+        {quente && <Ponto tom="atencao" className={cn(recolhida && "absolute top-[7px] right-[7px]")} />}
+      </a>
+    </Dica>
+  );
+}
+
+/** O grupo Meu dia com os blocos, Tarefas e Conexões. Na lateral, a tela atual se funde à Moldura. */
+function ListaDoMenu({ modelo, recolhida, naGaveta }: { modelo: ModeloDoMenu; recolhida: boolean; naGaveta: boolean }) {
+  const { meuDia } = modelo;
+  const grupoFundido = meuDia.grupoAberto && !naGaveta;
   return (
     <>
-      <nav aria-label="Telas" className={cn("sticky top-0 hidden h-dvh shrink-0 flex-col gap-1 py-2.5 pl-2.5 md:flex", recolhida ? "w-[4.25rem]" : "w-56")}>
-        <div className={cn("mb-2 flex h-10 items-center", recolhida ? "justify-center" : "justify-between pl-3")}>
-          {!recolhida && <span className="text-[15px] font-semibold tracking-tight">Secretária</span>}
-          <Button variant="ghost" size="icon-sm" aria-label={rotuloDoBotao} title={rotuloDoBotao} onClick={alternar}>
+      <div
+        role="group"
+        aria-label="Meu dia e os blocos"
+        className={cn(
+          "flex flex-col gap-px",
+          !naGaveta && "mb-1 rounded-l-xl border border-r-0 border-transparent pt-[3px] pb-1.5 pl-[3px]",
+          !naGaveta && (recolhida ? "pr-1" : "pr-2"),
+          grupoFundido && "relative z-[2] border-border bg-background",
+        )}
+      >
+        <ItemDoMenu linha={meuDia} Icone={CalendarCheck} forma="grupo" recolhida={recolhida} naGaveta={naGaveta} dentroDoGrupoAberto={grupoFundido} paiDoAtual={meuDia.paiDoAtual} />
+        {modelo.blocos.map((bloco) => (
+          <ItemDoMenu key={bloco.id} linha={bloco} Icone={ICONES_DOS_BLOCOS[bloco.id]} forma="bloco" recolhida={recolhida} naGaveta={naGaveta} dentroDoGrupoAberto={grupoFundido} />
+        ))}
+      </div>
+      <ItemDoMenu linha={modelo.tarefas} Icone={ListTodo} forma="aba" recolhida={recolhida} naGaveta={naGaveta} />
+      <ItemDoMenu linha={modelo.conexoes} Icone={PlugZap} forma="aba" recolhida={recolhida} naGaveta={naGaveta} />
+    </>
+  );
+}
+
+/** O cartão do pé: o resumo das conexões e, aberta, cada fonte com a idade, que sobe dentro do cartão. */
+function CartaoDasConexoes({ conexoes }: { conexoes: ConexoesDaLateral }) {
+  const [aberto, alternar] = useLembrado(CHAVE_FONTES_ABERTAS);
+  const id = useId();
+  return (
+    <div className={cn("overflow-hidden rounded-xl border bg-card transition-shadow duration-200", aberto && "shadow-[var(--sombra-do-painel)]")}>
+      <div id={id} inert={!aberto} className={cn("grid transition-[grid-template-rows,opacity] duration-200 ease-out", aberto ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
+        <div className="min-h-0 overflow-hidden">
+          <ul aria-label="Conexões e idade dos dados" className="flex flex-col gap-1 border-b px-3 pt-2.5 pb-2 text-[12.5px] text-muted-foreground">
+            {conexoes.fontes.map((fonte) => (
+              <li key={fonte.chave} className="flex min-w-0 items-center gap-2">
+                <Ponto tom={fonte.tom} />
+                <span className="min-w-0 flex-1 truncate">{fonte.nome}</span>
+                {fonte.tom === "atencao" && <span className="sr-only">, precisa de atenção</span>}
+                <span className="ml-auto whitespace-nowrap text-fraco tabular-nums">{fonte.detalhe}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+      <button
+        type="button"
+        aria-expanded={aberto}
+        aria-controls={id}
+        aria-label={`Conexões: ${conexoes.resumo}`}
+        onClick={alternar}
+        className="flex min-h-[34px] w-full items-center gap-2 px-2.5 py-2 text-left text-[12.5px] text-muted-foreground transition-colors outline-none hover:bg-passar-na-moldura hover:text-foreground"
+      >
+        <Ponto tom={conexoes.tom} />
+        <span className="min-w-0 flex-1 truncate">{conexoes.resumo}</span>
+        <ChevronUp aria-hidden className={cn("size-4 shrink-0 transition-transform duration-200", aberto && "rotate-180")} />
+      </button>
+    </div>
+  );
+}
+
+/** A lateral do computador: cabeçalho com o lugar do logo e o recolher, o menu que rola por dentro e o cartão do pé. Sem barra no topo. */
+export function Lateral({ modelo }: { modelo: ModeloDoMenu }) {
+  const [recolhida, alternar] = useLembrado(CHAVE_RECOLHIDA);
+  const rotuloDoBotao = recolhida ? "Abrir a lateral" : "Recolher a lateral";
+  return (
+    <nav
+      aria-label="Telas"
+      onKeyDown={moverFoco}
+      className={cn("sticky top-0 z-10 hidden h-dvh shrink-0 flex-col py-2.5 pl-2.5 transition-[width] duration-200 ease-out md:flex", recolhida ? "w-16" : "w-61")}
+    >
+      <div className={cn("mb-2 flex min-h-10 items-center gap-1.5 pr-2.5", recolhida ? "flex-col justify-center" : "justify-between pl-1")}>
+        {recolhida ? <LugarDoLogo /> : <Marca />}
+        <Dica texto={rotuloDoBotao} ativa>
+          <Button variant="ghost" size="icon-sm" aria-label={rotuloDoBotao} onClick={alternar}>
             {recolhida ? <PanelLeftOpen aria-hidden /> : <PanelLeftClose aria-hidden />}
           </Button>
+        </Dica>
+      </div>
+      <div className="-mr-px flex min-h-0 flex-1 flex-col gap-0.5 overflow-x-hidden overflow-y-auto [scrollbar-width:thin]">
+        <ListaDoMenu modelo={modelo} recolhida={recolhida} naGaveta={false} />
+      </div>
+      {modelo.cartao !== null && !recolhida && (
+        <div className="relative z-[3] flex-none bg-sidebar pt-2.5 pr-2.5">
+          <CartaoDasConexoes conexoes={modelo.cartao} />
         </div>
-        {ITENS.map(({ secao, nome, Icone }) => (
-          <a
-            key={secao}
-            href={hashDaRota({ tela: secao })}
-            aria-current={atual === secao ? "page" : undefined}
-            title={recolhida ? nome : undefined}
-            className={cn(
-              "flex h-9 items-center gap-3 rounded-md text-sm text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground",
-              recolhida ? "justify-center" : "px-3",
-              atual === secao && "bg-accent font-medium text-foreground",
-            )}
-          >
-            <Icone aria-hidden className="size-4 shrink-0" />
-            <span className={cn(recolhida && "sr-only")}>{nome}</span>
-          </a>
-        ))}
-      </nav>
+      )}
+    </nav>
+  );
+}
 
-      <nav aria-label="Telas" className="fixed inset-x-0 bottom-0 z-10 grid grid-cols-3 border-t bg-sidebar pb-[env(safe-area-inset-bottom)] md:hidden">
-        {ITENS.map(({ secao, nome, Icone }) => (
-          <a
-            key={secao}
-            href={hashDaRota({ tela: secao })}
-            aria-current={atual === secao ? "page" : undefined}
-            className={cn(
-              "flex h-16 flex-col items-center justify-center gap-1 text-xs text-muted-foreground outline-none hover:text-foreground",
-              atual === secao && "font-medium text-foreground",
-            )}
+/** No celular: o botão Menu no topo do conteúdo abre o mesmo menu numa gaveta pela esquerda. A gaveta fecha com Esc, com o X ou ao escolher uma tela. */
+export function MenuDoCelular({ modelo }: { modelo: ModeloDoMenu }) {
+  const [aberto, setAberto] = useState(false);
+  return (
+    <div className="flex items-center gap-2.5 md:hidden">
+      <Sheet open={aberto} onOpenChange={setAberto}>
+        <SheetTrigger asChild>
+          <Button variant="outline" size="sm">
+            <Menu aria-hidden />
+            Menu
+          </Button>
+        </SheetTrigger>
+        <SheetContent
+          side="left"
+          showCloseButton={false}
+          aria-describedby={undefined}
+          className="w-[min(300px,86%)] gap-0 bg-sidebar sm:max-w-none data-[state=closed]:duration-150 data-[state=open]:duration-200"
+        >
+          <div className="flex items-center justify-between gap-2 py-2.5 pr-2.5 pl-3.5">
+            <SheetTitle asChild>
+              <div>
+                <Marca />
+              </div>
+            </SheetTitle>
+            <SheetClose asChild>
+              <Button variant="ghost" size="icon-sm" aria-label="Fechar o menu">
+                <X aria-hidden />
+              </Button>
+            </SheetClose>
+          </div>
+          <nav
+            aria-label="Telas"
+            onKeyDown={moverFoco}
+            onClick={(evento) => {
+              if ((evento.target as HTMLElement).closest("a[href]") !== null) setAberto(false);
+            }}
+            className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-2.5 pb-3.5"
           >
-            <span className={cn("grid h-7 w-12 place-items-center rounded-full transition-colors", atual === secao && "bg-accent")}>
-              <Icone aria-hidden className="size-5" />
-            </span>
-            {nome}
-          </a>
-        ))}
-      </nav>
-    </>
+            <ListaDoMenu modelo={modelo} recolhida={false} naGaveta />
+            {modelo.cartao !== null && (
+              <div className="mt-auto pt-2.5">
+                <CartaoDasConexoes conexoes={modelo.cartao} />
+              </div>
+            )}
+          </nav>
+        </SheetContent>
+      </Sheet>
+      <Marca />
+    </div>
   );
 }

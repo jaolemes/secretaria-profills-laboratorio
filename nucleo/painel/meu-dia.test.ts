@@ -136,6 +136,7 @@ function dia(campos: Partial<MeuDia> = {}, leituras: LeiturasDoCrm = SEM_LEITURA
     hoje: HOJE,
     fazer_hoje: [],
     sem_data: [],
+    tarefas_abertas: 0,
     aprovar: [],
     fontes: [{ fonte: "tarefas", lidaEm: AGORA, idadeMin: 0 }, { fonte: "whatsapp", lidaEm: AGORA, idadeMin: 0 }, { fonte: "crm", lidaEm: AGORA, idadeMin: 0 }],
     ...montarBlocosDoCrm(leituras, crm, HOJE, SEM_IGNORADOS),

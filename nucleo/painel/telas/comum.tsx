@@ -20,17 +20,29 @@ export interface Carga<T> {
   recarregar(): void;
 }
 
+const ultimasLeituras = new Map<string, unknown>();
+
+/** Guarda a última leitura boa de uma chave: a tela que volta a mostra no primeiro quadro, sem piscar vazia. */
+export function guardarLeitura(chave: string, dados: unknown): void {
+  ultimasLeituras.set(chave, dados);
+}
+
+function ultimaLeitura<T>(chave: string): T | null {
+  return (ultimasLeituras.get(chave) as T | undefined) ?? null;
+}
+
 /**
  * Carrega pela API e recarrega quando `gatilho` muda (o `event: tarefas` do SSE) ou por `recarregar`.
  * Resposta que chega depois de outra mais nova é descartada. Os dados de outra `chave` não aparecem.
+ * Enquanto lê, mostra a última leitura da mesma chave, de antes de a tela sair.
  */
 export function useCarga<T>(chave: string, carregar: () => Promise<Resposta<T>>, gatilho: string | number): Carga<T> {
-  const [carga, setCarga] = useState<{ chave: string; dados: T | null; erro: ErroOperacao | null; carregando: boolean }>({
+  const [carga, setCarga] = useState<{ chave: string; dados: T | null; erro: ErroOperacao | null; carregando: boolean }>(() => ({
     chave,
-    dados: null,
+    dados: ultimaLeitura<T>(chave),
     erro: null,
     carregando: true,
-  });
+  }));
   const [rodada, setRodada] = useState(0);
 
   useEffect(() => {
@@ -38,6 +50,7 @@ export function useCarga<T>(chave: string, carregar: () => Promise<Resposta<T>>,
     setCarga((atual) => ({ ...atual, carregando: true }));
     void carregar().then((resposta) => {
       if (!valendo) return;
+      if (resposta.ok) guardarLeitura(chave, resposta.dados);
       setCarga((atual) => ({
         chave,
         dados: resposta.ok ? resposta.dados : atual.chave === chave ? atual.dados : null,
@@ -53,7 +66,7 @@ export function useCarga<T>(chave: string, carregar: () => Promise<Resposta<T>>,
 
   const recarregar = useCallback(() => setRodada((n) => n + 1), []);
   const daChave = carga.chave === chave;
-  return { dados: daChave ? carga.dados : null, erro: daChave ? carga.erro : null, carregando: carga.carregando || !daChave, recarregar };
+  return { dados: daChave ? carga.dados : ultimaLeitura<T>(chave), erro: daChave ? carga.erro : null, carregando: carga.carregando || !daChave, recarregar };
 }
 
 export interface Executor {
@@ -105,7 +118,7 @@ const ESTILO_DO_AVISO: { readonly [T in Aviso["tom"]]: string } = {
   erro: "border-destructive/50",
 };
 
-/** Fica no rodapé da janela, acima da navegação do celular e da gaveta, para ser visto de qualquer ponto da lista. `noTopo` o põe no alto, no meio. */
+/** Fica no rodapé da janela, acima da gaveta, para ser visto de qualquer ponto da lista. `noTopo` o põe no alto, no meio. */
 export function AvisoFlutuante({ aviso, fechar }: { aviso: Aviso | null; fechar: () => void }) {
   if (aviso === null) return null;
   const linkSeguro = aviso.link === undefined ? null : linkDoCrm(aviso.link);
@@ -115,7 +128,7 @@ export function AvisoFlutuante({ aviso, fechar }: { aviso: Aviso | null; fechar:
       role={aviso.tom === "feito" ? "status" : "alert"}
       className={cn(
         "fixed z-[60] flex items-start gap-3 rounded-xl border bg-popover px-4 py-3 shadow-[var(--sombra-do-painel)]",
-        aviso.noTopo ? "inset-x-4 top-4 md:inset-x-auto md:left-1/2 md:w-[26rem] md:-translate-x-1/2" : "inset-x-4 bottom-20 md:inset-x-auto md:right-6 md:bottom-6 md:w-[26rem]",
+        aviso.noTopo ? "inset-x-4 top-4 md:inset-x-auto md:left-1/2 md:w-[26rem] md:-translate-x-1/2" : "inset-x-4 bottom-4 md:inset-x-auto md:right-6 md:bottom-6 md:w-[26rem]",
         ESTILO_DO_AVISO[aviso.tom],
       )}
     >

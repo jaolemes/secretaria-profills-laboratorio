@@ -1,0 +1,9 @@
+{
+  "client_id": "https://www.crmprofills.com.br/oauth/apps/secretaria.json",
+  "client_name": "Secretária Profills",
+  "redirect_uris": ["http://127.0.0.1/oauth/crm/retorno"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none",
+  "scope": "crm.leitura"
+}

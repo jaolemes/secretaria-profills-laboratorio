@@ -1,0 +1,14 @@
+# Texto sai com LF em todo sistema: o sha256 das migrações e os scripts dependem disso.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.db binary
+*.sqlite binary
+*.zip binary
+*.gz binary

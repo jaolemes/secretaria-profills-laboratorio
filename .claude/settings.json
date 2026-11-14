@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Bash(wacli send *)",
+      "Bash(wacli send:*)",
+      "Bash(*/wacli send *)",
+      "Bash(*wacli.exe send *)",
+      "Bash(*wacli * send *)",
+      "Bash(*wacli.exe * send *)",
+      "PowerShell(*wacli* send *)",
+      "mcp__claude_ai_CRM_Profills__registrar_atendimento",
+      "mcp__claude_ai_CRM_Profills__criar_compromisso",
+      "mcp__claude_ai_CRM_Profills__criar_contato",
+      "mcp__plugin_crm-profills_crm-profills__registrar_atendimento",
+      "mcp__plugin_crm-profills_crm-profills__criar_compromisso",
+      "mcp__plugin_crm-profills_crm-profills__criar_contato"
+    ],
+    "ask": [
+      "mcp__claude_ai_CRM_Profills__editar_atendimento",
+      "mcp__claude_ai_CRM_Profills__editar_compromisso",
+      "mcp__claude_ai_CRM_Profills__editar_contato",
+      "mcp__claude_ai_CRM_Profills__enviar_proposta",
+      "mcp__claude_ai_CRM_Profills__excluir_atendimento",
+      "mcp__claude_ai_CRM_Profills__excluir_compromisso",
+      "mcp__plugin_crm-profills_crm-profills__editar_atendimento",
+      "mcp__plugin_crm-profills_crm-profills__editar_compromisso",
+      "mcp__plugin_crm-profills_crm-profills__editar_contato",
+      "mcp__plugin_crm-profills_crm-profills__enviar_proposta",
+      "mcp__plugin_crm-profills_crm-profills__excluir_atendimento",
+      "mcp__plugin_crm-profills_crm-profills__excluir_compromisso"
+    ]
+  }
+}

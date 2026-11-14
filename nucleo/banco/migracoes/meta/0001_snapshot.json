@@ -1,0 +1,239 @@
+{
+  "id": "0eb3e142-e0a0-4afa-b8b0-b59ec6b23482",
+  "prevId": "3b4e737d-ce2e-4691-9335-4d6a544d5525",
+  "version": "6",
+  "dialect": "sqlite",
+  "tables": {
+    "conector": {
+      "name": "conector",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fase": {
+          "name": "fase",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'desconectado'"
+        },
+        "identidade": {
+          "name": "identidade",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "config": {
+          "name": "config",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "codigo_problema": {
+          "name": "codigo_problema",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "conexao_expira_em": {
+          "name": "conexao_expira_em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verificado_em": {
+          "name": "verificado_em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "conector_id": {
+          "name": "conector_id",
+          "value": "\"conector\".\"id\" IN ('whatsapp', 'crm', 'email')"
+        },
+        "conector_fase": {
+          "name": "conector_fase",
+          "value": "\"conector\".\"fase\" IN ('desconectado', 'conectado', 'atencao')"
+        },
+        "conector_config_json": {
+          "name": "conector_config_json",
+          "value": "\"conector\".\"config\" IS NULL OR json_valid(\"conector\".\"config\")"
+        },
+        "conector_problema_so_em_atencao": {
+          "name": "conector_problema_so_em_atencao",
+          "value": "(\"conector\".\"fase\" = 'atencao') = (\"conector\".\"codigo_problema\" IS NOT NULL)"
+        },
+        "conector_conectado_verificado": {
+          "name": "conector_conectado_verificado",
+          "value": "\"conector\".\"fase\" <> 'conectado' OR \"conector\".\"verificado_em\" IS NOT NULL"
+        },
+        "conector_conectado_com_identidade": {
+          "name": "conector_conectado_com_identidade",
+          "value": "\"conector\".\"fase\" <> 'conectado' OR \"conector\".\"id\" = 'crm' OR \"conector\".\"identidade\" IS NOT NULL"
+        },
+        "conector_email_com_config": {
+          "name": "conector_email_com_config",
+          "value": "\"conector\".\"id\" <> 'email' OR \"conector\".\"fase\" <> 'conectado' OR \"conector\".\"config\" IS NOT NULL"
+        },
+        "conector_crm_com_prazo": {
+          "name": "conector_crm_com_prazo",
+          "value": "\"conector\".\"id\" <> 'crm' OR \"conector\".\"fase\" <> 'conectado' OR \"conector\".\"conexao_expira_em\" IS NOT NULL"
+        }
+      }
+    },
+    "evento_conector": {
+      "name": "evento_conector",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "conector": {
+          "name": "conector",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "detalhe": {
+          "name": "detalhe",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "em": {
+          "name": "em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "evento_conector_por_conector": {
+          "name": "evento_conector_por_conector",
+          "columns": [
+            "conector",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "evento_conector_conector_conector_id_fk": {
+          "name": "evento_conector_conector_conector_id_fk",
+          "tableFrom": "evento_conector",
+          "columnsFrom": [
+            "conector"
+          ],
+          "tableTo": "conector",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "evento_conector_detalhe_json": {
+          "name": "evento_conector_detalhe_json",
+          "value": "json_valid(\"evento_conector\".\"detalhe\")"
+        }
+      }
+    },
+    "instalacao": {
+      "name": "instalacao",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "id_instalacao": {
+          "name": "id_instalacao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "criada_em": {
+          "name": "criada_em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cofre_backend": {
+          "name": "cofre_backend",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "instalacao_unica": {
+          "name": "instalacao_unica",
+          "value": "\"instalacao\".\"id\" = 1"
+        },
+        "instalacao_cofre_backend": {
+          "name": "instalacao_cofre_backend",
+          "value": "\"instalacao\".\"cofre_backend\" IS NULL OR \"instalacao\".\"cofre_backend\" IN ('sistema', 'arquivo')"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

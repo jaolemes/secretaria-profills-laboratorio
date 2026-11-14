@@ -1,0 +1,446 @@
+{
+  "id": "cdc73806-74e0-418c-aed6-408bd44fb94d",
+  "prevId": "ad70ffb9-f585-4838-ba22-0f463b83c2e2",
+  "version": "6",
+  "dialect": "sqlite",
+  "tables": {
+    "conector": {
+      "name": "conector",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fase": {
+          "name": "fase",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'desconectado'"
+        },
+        "identidade": {
+          "name": "identidade",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "config": {
+          "name": "config",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "codigo_problema": {
+          "name": "codigo_problema",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "conexao_expira_em": {
+          "name": "conexao_expira_em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "verificado_em": {
+          "name": "verificado_em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "conector_id": {
+          "name": "conector_id",
+          "value": "\"conector\".\"id\" IN ('whatsapp', 'crm', 'email')"
+        },
+        "conector_fase": {
+          "name": "conector_fase",
+          "value": "\"conector\".\"fase\" IN ('desconectado', 'conectado', 'atencao')"
+        },
+        "conector_config_json": {
+          "name": "conector_config_json",
+          "value": "\"conector\".\"config\" IS NULL OR json_valid(\"conector\".\"config\")"
+        },
+        "conector_problema_so_em_atencao": {
+          "name": "conector_problema_so_em_atencao",
+          "value": "(\"conector\".\"fase\" = 'atencao') = (\"conector\".\"codigo_problema\" IS NOT NULL)"
+        },
+        "conector_conectado_verificado": {
+          "name": "conector_conectado_verificado",
+          "value": "\"conector\".\"fase\" <> 'conectado' OR \"conector\".\"verificado_em\" IS NOT NULL"
+        },
+        "conector_conectado_com_identidade": {
+          "name": "conector_conectado_com_identidade",
+          "value": "\"conector\".\"fase\" <> 'conectado' OR \"conector\".\"id\" = 'crm' OR \"conector\".\"identidade\" IS NOT NULL"
+        },
+        "conector_email_com_config": {
+          "name": "conector_email_com_config",
+          "value": "\"conector\".\"id\" <> 'email' OR \"conector\".\"fase\" <> 'conectado' OR \"conector\".\"config\" IS NOT NULL"
+        },
+        "conector_crm_com_prazo": {
+          "name": "conector_crm_com_prazo",
+          "value": "\"conector\".\"id\" <> 'crm' OR \"conector\".\"fase\" <> 'conectado' OR \"conector\".\"conexao_expira_em\" IS NOT NULL"
+        }
+      }
+    },
+    "evento_conector": {
+      "name": "evento_conector",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "conector": {
+          "name": "conector",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "detalhe": {
+          "name": "detalhe",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "em": {
+          "name": "em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "evento_conector_por_conector": {
+          "name": "evento_conector_por_conector",
+          "columns": [
+            "conector",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "evento_conector_conector_conector_id_fk": {
+          "name": "evento_conector_conector_conector_id_fk",
+          "tableFrom": "evento_conector",
+          "columnsFrom": [
+            "conector"
+          ],
+          "tableTo": "conector",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "evento_conector_detalhe_json": {
+          "name": "evento_conector_detalhe_json",
+          "value": "json_valid(\"evento_conector\".\"detalhe\")"
+        }
+      }
+    },
+    "instalacao": {
+      "name": "instalacao",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "id_instalacao": {
+          "name": "id_instalacao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "criada_em": {
+          "name": "criada_em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cofre_backend": {
+          "name": "cofre_backend",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "instalacao_unica": {
+          "name": "instalacao_unica",
+          "value": "\"instalacao\".\"id\" = 1"
+        },
+        "instalacao_cofre_backend": {
+          "name": "instalacao_cofre_backend",
+          "value": "\"instalacao\".\"cofre_backend\" IS NULL OR \"instalacao\".\"cofre_backend\" IN ('sistema', 'arquivo')"
+        }
+      }
+    },
+    "nota": {
+      "name": "nota",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "tarefa_id": {
+          "name": "tarefa_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "texto": {
+          "name": "texto",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "autor": {
+          "name": "autor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "proximo_passo": {
+          "name": "proximo_passo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "criada_em": {
+          "name": "criada_em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "nota_por_tarefa": {
+          "name": "nota_por_tarefa",
+          "columns": [
+            "tarefa_id",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "nota_tarefa_id_tarefa_id_fk": {
+          "name": "nota_tarefa_id_tarefa_id_fk",
+          "tableFrom": "nota",
+          "columnsFrom": [
+            "tarefa_id"
+          ],
+          "tableTo": "tarefa",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "nota_autor": {
+          "name": "nota_autor",
+          "value": "\"nota\".\"autor\" IN ('vendedor', 'agente')"
+        },
+        "nota_texto": {
+          "name": "nota_texto",
+          "value": "length(\"nota\".\"texto\") BETWEEN 1 AND 4000"
+        },
+        "nota_proximo_passo": {
+          "name": "nota_proximo_passo",
+          "value": "\"nota\".\"proximo_passo\" IS NULL OR length(\"nota\".\"proximo_passo\") BETWEEN 1 AND 500"
+        }
+      }
+    },
+    "tarefa": {
+      "name": "tarefa",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "titulo": {
+          "name": "titulo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cliente_id": {
+          "name": "cliente_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cliente_nome": {
+          "name": "cliente_nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "proposta_codigo": {
+          "name": "proposta_codigo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "vence_em": {
+          "name": "vence_em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "estado": {
+          "name": "estado",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'aberta'"
+        },
+        "origem": {
+          "name": "origem",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "versao": {
+          "name": "versao",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "criada_em": {
+          "name": "criada_em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "atualizada_em": {
+          "name": "atualizada_em",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "tarefa_por_estado": {
+          "name": "tarefa_por_estado",
+          "columns": [
+            "estado",
+            "vence_em"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "tarefa_estado": {
+          "name": "tarefa_estado",
+          "value": "\"tarefa\".\"estado\" IN ('aberta', 'concluida', 'descartada')"
+        },
+        "tarefa_origem": {
+          "name": "tarefa_origem",
+          "value": "\"tarefa\".\"origem\" IN ('vendedor', 'agente')"
+        },
+        "tarefa_titulo": {
+          "name": "tarefa_titulo",
+          "value": "length(\"tarefa\".\"titulo\") BETWEEN 1 AND 200"
+        },
+        "tarefa_vence_em": {
+          "name": "tarefa_vence_em",
+          "value": "\"tarefa\".\"vence_em\" IS NULL OR (length(\"tarefa\".\"vence_em\") = 10 AND date(\"tarefa\".\"vence_em\") IS \"tarefa\".\"vence_em\")"
+        },
+        "tarefa_versao": {
+          "name": "tarefa_versao",
+          "value": "\"tarefa\".\"versao\" >= 1"
+        }
+      }
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

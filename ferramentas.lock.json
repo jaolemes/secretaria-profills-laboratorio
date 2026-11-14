@@ -1,0 +1,31 @@
+{
+  "wacli": {
+    "versao": "0.26.0",
+    "licenca": "MIT",
+    "origem": "https://github.com/openclaw/wacli/releases/tag/v0.26.0",
+    "checksums": "https://github.com/openclaw/wacli/releases/download/v0.26.0/checksums.txt",
+    "macosMinimo": 15,
+    "artefatos": {
+      "linux-x64": {
+        "url": "https://github.com/openclaw/wacli/releases/download/v0.26.0/wacli_0.26.0_linux_amd64.tar.gz",
+        "sha256": "2c28f65e2f9aaf32585288229db1f916c6c5fb5db9513715017d528513604b44"
+      },
+      "linux-arm64": {
+        "url": "https://github.com/openclaw/wacli/releases/download/v0.26.0/wacli_0.26.0_linux_arm64.tar.gz",
+        "sha256": "777a5dccece12421b7ee4af001b074e5ebc1c7a63f732cf642c3e7b3c4d7c7b9"
+      },
+      "darwin-x64": {
+        "url": "https://github.com/openclaw/wacli/releases/download/v0.26.0/wacli_0.26.0_darwin_amd64.tar.gz",
+        "sha256": "fd87aa18873886376b0a8b4fa43c4ac1c47e047177a559fa4b6add594371733a"
+      },
+      "darwin-arm64": {
+        "url": "https://github.com/openclaw/wacli/releases/download/v0.26.0/wacli_0.26.0_darwin_arm64.tar.gz",
+        "sha256": "51ea21ebecc47ccd5df6bd90940fe827fc0eb1e191098bf56dd03363d69d34a5"
+      },
+      "win32-x64": {
+        "url": "https://github.com/openclaw/wacli/releases/download/v0.26.0/wacli_0.26.0_windows_amd64.zip",
+        "sha256": "13c40d140c463037484d1b0955f99084db1f1de3e3e1811ac688ecc809c17014"
+      }
+    }
+  }
+}

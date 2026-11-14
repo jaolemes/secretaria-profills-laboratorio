@@ -1,0 +1,69 @@
+name: CI
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  nucleo:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 40 || 20 }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run tipos
+      - run: bun test
+      - name: Instalação duas vezes
+        env:
+          SECRETARIA_DADOS: ${{ runner.temp }}/secretaria-dados
+        run: |
+          bun secretaria instalar --json > "$RUNNER_TEMP/primeira.json"
+          bun secretaria instalar --json > "$RUNNER_TEMP/segunda.json"
+          bun -e '
+            const path = require("node:path");
+            const ler = (nome) => {
+              const json = JSON.parse(require("node:fs").readFileSync(path.join(process.env.RUNNER_TEMP, nome), "utf8"));
+              return json.dados ?? json;
+            };
+            const primeira = ler("primeira.json");
+            const segunda = ler("segunda.json");
+            console.log(JSON.stringify(segunda, null, 2));
+            if (!primeira.pronto) throw new Error("a primeira rodada não ficou pronta");
+            const mudaram = segunda.passos.filter((passo) => passo.resultado !== "ja_estava");
+            if (mudaram.length > 0) throw new Error("a segunda rodada não devolveu ja_estava em: " + mudaram.map((passo) => passo.id).join(", "));
+          '
+      - name: Fumaça do wacli real
+        env:
+          SECRETARIA_DADOS: ${{ runner.temp }}/secretaria-dados
+        run: |
+          bun -e '
+            const path = require("node:path");
+            const wacli = path.join(process.env.SECRETARIA_DADOS, "bin", process.platform === "win32" ? "wacli.exe" : "wacli");
+            const store = path.join(process.env.RUNNER_TEMP, "store-vazia");
+            const rodar = (args) => {
+              const saida = Bun.spawnSync([wacli, ...args], { env: { ...process.env, WACLI_STORE_DIR: store, WACLI_READONLY: "1" } });
+              const texto = saida.stdout.toString().trim();
+              console.log(texto);
+              if (saida.exitCode !== 0) throw new Error(`wacli ${args.join(" ")} saiu com ${saida.exitCode}`);
+              return texto;
+            };
+            if (rodar(["--version"]) !== "wacli 0.26.0") throw new Error("versão inesperada do wacli");
+            if (JSON.parse(rodar(["--read-only", "--json", "doctor"])).success !== true) throw new Error("o doctor não respondeu sucesso");
+          '
+      - name: Sintaxe do instalar.ps1
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $erros = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("$PWD\instalar.ps1", [ref]$null, [ref]$erros) | Out-Null
+          if ($erros) { $erros; exit 1 }

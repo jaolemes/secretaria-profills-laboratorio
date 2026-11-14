@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "skills": {
+    "shadcn": {
+      "source": "shadcn-ui/ui",
+      "sourceType": "github",
+      "skillPath": "skills/shadcn/SKILL.md",
+      "computedHash": "388962d16c7a4f13aaeee0d8f128e50a87df8553d42ef7988c39c0e1c74a40e8",
+      "installMode": "copy"
+    },
+    "wacli": {
+      "source": "openclaw/wacli",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/wacli/SKILL.md",
+      "computedHash": "d782f5bdd5239942801a382be69a8fa1161d88a75945f9055ae37347687804c7",
+      "installMode": "copy"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+node_modules
+dist
+out
+coverage
+*.lcov
+*.tsbuildinfo
+.cache
+.eslintcache
+.idea
+.DS_Store
+
+# Dados do vendedor moram na pasta de dados do sistema, nunca no checkout.
+.env
+.env.*
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+cofre.json
+servidor.json
+ambiente.json
+logs
+backups
+
+# Cópias geradas das skills do vendedor; a fonte versionada é meu/skills.
+.agents/skills/meu-*/
+.claude/skills/meu-*/
+.claude/settings.local.json
+.claude/worktrees/

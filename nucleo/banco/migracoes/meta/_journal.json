@@ -1,0 +1,97 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1794413564670,
+      "tag": "0000_fundacao",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794413573026,
+      "tag": "0001_sementes",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794430169097,
+      "tag": "0002_tarefas",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794430190168,
+      "tag": "0003_nota_so_insercao",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794433960312,
+      "tag": "0004_email_contas",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794433974125,
+      "tag": "0005_email_conta_unica",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794579326516,
+      "tag": "0006_crm_cache",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794584511874,
+      "tag": "0007_item_ignorado",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794587300916,
+      "tag": "0008_quem_ignorou",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794598325394,
+      "tag": "0009_vinculo_de_conversa",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794618247533,
+      "tag": "0010_cabecalho_de_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794644009096,
+      "tag": "0011_fila_de_aprovacao",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794644014070,
+      "tag": "0012_decisao_so_insercao",
+      "breakpoints": true
+    }
+  ]
+}

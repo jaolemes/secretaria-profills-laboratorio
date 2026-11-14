@@ -1,0 +1,14 @@
+# Instruções aos agentes, instalação e dependências: o agente do vendedor obedece a estes arquivos.
+/.claude/ @othavi0
+/.agents/ @othavi0
+/AGENTS.md @othavi0
+/CLAUDE.md @othavi0
+/meu/AGENTS.md @othavi0
+/instalar.sh @othavi0
+/instalar.ps1 @othavi0
+/ferramentas.lock.json @othavi0
+/nucleo/instalador/ @othavi0
+/bun.lock @othavi0
+/package.json @othavi0
+/skills-lock.json @othavi0
+/.github/ @othavi0

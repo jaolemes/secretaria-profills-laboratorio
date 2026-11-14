@@ -609,7 +609,7 @@ describe("texto de tarefa e nota sai como texto", () => {
     expect(noTopo).toContain("Marcado como não cliente.");
     expect(noTopo).toContain(">Desfazer<");
     const embaixo = renderToStaticMarkup(<AvisoFlutuante aviso={aviso} fechar={() => {}} />);
-    expect(embaixo).toContain("bottom-20");
+    expect(embaixo).toContain("bottom-4");
     expect(embaixo).not.toContain("top-4");
   });
 

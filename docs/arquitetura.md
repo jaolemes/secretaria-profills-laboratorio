@@ -246,6 +246,11 @@ As regras ficam em `nucleo/tarefas`, sem I/O. `decidir(atual, comando, contexto)
 - Quem cria manda o `id` da tarefa, um UUID. `POST /api/tarefas` com um `id` que já existe devolve a tarefa que existe e não grava nada. O painel usa um id por rascunho e o CLI gera um por comando, ou recebe `--id`. O `concluir` repetido já cai em `conflito_de_versao`, então a tarefa seguinte também não duplica.
 - `nota` só aceita inserção: os gatilhos da migração `0003` recusam UPDATE e DELETE.
 - O SSE manda `event: tarefas` com `data: {}` a cada mudança. O painel recarrega pela API; o evento não leva a lista.
+- `GET /api/meu-dia` traz `tarefas_abertas`, quantas tarefas estão abertas com qualquer prazo. É o número de Tarefas na lateral do painel.
+
+### Lateral do painel
+
+A lateral (`nucleo/painel/Navegacao.tsx`) não lê nada por conta própria. O `App` faz uma leitura de `/api/meu-dia` para o painel inteiro (`useDia`) e passa a mesma `Carga` à tela Meu dia; a lateral conta os blocos e as tarefas dessa leitura em toda tela. O cartão do pé junta o snapshot do SSE (fase de cada conector e de cada conta de e-mail) com as idades do rodapé do Meu dia. `modeloDoMenu` (`nucleo/painel/lateral.ts`) é a função pura que decide o item atual, as contagens, o ponto quente e o destino de cada link. A linha Meu dia volta ao último bloco que a rota mostrou (`listaLembrada`), guardado só na memória da aba. Recolhida e cartão aberto ficam no `localStorage`. No celular, o mesmo menu abre numa gaveta pela esquerda, pelo botão Menu.
 
 ## Leitura do CRM
 

@@ -118,7 +118,7 @@ const ESTILO_DO_AVISO: { readonly [T in Aviso["tom"]]: string } = {
   erro: "border-destructive/50",
 };
 
-/** Fica no rodapé da janela, acima da navegação do celular e da gaveta, para ser visto de qualquer ponto da lista. `noTopo` o põe no alto, no meio. */
+/** Fica no rodapé da janela, acima da gaveta, para ser visto de qualquer ponto da lista. `noTopo` o põe no alto, no meio. */
 export function AvisoFlutuante({ aviso, fechar }: { aviso: Aviso | null; fechar: () => void }) {
   if (aviso === null) return null;
   const linkSeguro = aviso.link === undefined ? null : linkDoCrm(aviso.link);
@@ -128,7 +128,7 @@ export function AvisoFlutuante({ aviso, fechar }: { aviso: Aviso | null; fechar:
       role={aviso.tom === "feito" ? "status" : "alert"}
       className={cn(
         "fixed z-[60] flex items-start gap-3 rounded-xl border bg-popover px-4 py-3 shadow-[var(--sombra-do-painel)]",
-        aviso.noTopo ? "inset-x-4 top-4 md:inset-x-auto md:left-1/2 md:w-[26rem] md:-translate-x-1/2" : "inset-x-4 bottom-20 md:inset-x-auto md:right-6 md:bottom-6 md:w-[26rem]",
+        aviso.noTopo ? "inset-x-4 top-4 md:inset-x-auto md:left-1/2 md:w-[26rem] md:-translate-x-1/2" : "inset-x-4 bottom-4 md:inset-x-auto md:right-6 md:bottom-6 md:w-[26rem]",
         ESTILO_DO_AVISO[aviso.tom],
       )}
     >

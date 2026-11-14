@@ -38,6 +38,14 @@
   --destructive: #f4a08c;
   --destructive-foreground: #2a1410;
   --trilho: #2a2724;
+  /* Lateral: o hover sobre a cor da lateral e sobre a Moldura, e o item atual, que nunca se confunde com o hover. */
+  --passar: #33302c;
+  --passar-na-moldura: #3c3934;
+  --ativo: #46423d;
+  --ativo-borda: #5a554f;
+  --fraco: #8f8a85;
+  --dica: #f3f1ef;
+  --dica-foreground: #23211e;
   --sombra-do-painel: 0 1px 2px rgb(0 0 0 / 0.25), 0 8px 24px rgb(0 0 0 / 0.18);
 }
 
@@ -64,6 +72,13 @@
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-trilho: var(--trilho);
+  --color-passar: var(--passar);
+  --color-passar-na-moldura: var(--passar-na-moldura);
+  --color-ativo: var(--ativo);
+  --color-ativo-borda: var(--ativo-borda);
+  --color-fraco: var(--fraco);
+  --color-dica: var(--dica);
+  --color-dica-foreground: var(--dica-foreground);
 
   --radius-xs: 4px;
   --radius-sm: 6px;

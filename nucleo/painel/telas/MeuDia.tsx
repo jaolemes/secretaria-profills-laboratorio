@@ -60,7 +60,7 @@ import {
 } from "../conversas";
 import { useAcoesDaTarefa } from "./AcoesDaTarefa";
 import { MOTIVO_DE_ABRIR_O_TEXTO, acoesDaLinha, fraseDoPortao, motivoDoAprovar, selosDoCartao, vistaDoBotao, type AcaoDeDecisao, type AcaoDoCartao, type PortaoDoCrm } from "../aprovar";
-import { AvisoFlutuante, BotaoDoMotivo, CabecalhoDaTela, ErroDeCarga, MetaDaTarefa, api, useCarga, useExecutor, type Executor } from "./comum";
+import { AvisoFlutuante, BotaoDoMotivo, CabecalhoDaTela, ErroDeCarga, MetaDaTarefa, api, useExecutor, type Carga, type Executor } from "./comum";
 import { BotaoDoCartao, GavetaDoCartao } from "./GavetaDoCartao";
 import { GavetasDasConversas, type GavetaAberta } from "./GavetasDasConversas";
 import { useFila, type FilaDeAprovacao } from "./useFila";
@@ -672,16 +672,6 @@ function Rodape({ dia, rotulo, sincronizando, sincronizar }: { dia: DadosDoDia; 
   );
 }
 
-/** A idade das fontes envelhece sozinha: o Meu dia recarrega a cada minuto, além do `event: tarefas`. */
-function useMinuto(): number {
-  const [minuto, setMinuto] = useState(0);
-  useEffect(() => {
-    const relogio = setInterval(() => setMinuto((n) => n + 1), 60_000);
-    return () => clearInterval(relogio);
-  }, []);
-  return minuto;
-}
-
 /**
  * A rodada pedida aqui, mais o andamento que o SSE mostra, de qualquer rodada. A resposta do POST
  * fecha a rodada dela mesmo se o `terminou` do SSE se perdeu.
@@ -795,20 +785,16 @@ function useAcoesDoDia(hoje: Dia | null, recarregar: () => void, executor: Execu
 }
 
 export interface PropsDoMeuDia {
+  /** A leitura de `/api/meu-dia` do painel, a mesma que a lateral conta. */
+  readonly carga: Carga<DadosDoDia>;
   readonly mudancas: number;
   readonly lista: ListaDoDia | undefined;
   readonly sincronizacao: EstadoDaSincronizacao;
-  /** Muda quando uma rodada termina, pedida aqui ou pelo agente: o Meu dia recarrega o CRM. */
-  readonly rodadasTerminadas: number;
-  /** Muda quando o WhatsApp ou o CRM muda de fase: o motivo de um bloco sem leitura depende delas. */
-  readonly conectores: string;
   /** O estado do CRM, para barrar Aprovar na tela com o motivo. `null` até o primeiro estado do SSE: o servidor responde. */
   readonly crm: EstadoCrm | null;
 }
 
-export function MeuDia({ mudancas, lista, sincronizacao, rodadasTerminadas, conectores, crm }: PropsDoMeuDia) {
-  const minuto = useMinuto();
-  const carga = useCarga("meu-dia", () => api.meuDia(), `${mudancas}:${minuto}:${rodadasTerminadas}:${conectores}`);
+export function MeuDia({ carga, mudancas, lista, sincronizacao, crm }: PropsDoMeuDia) {
   const executor = useExecutor(carga.recarregar);
   const dia = carga.dados;
   const blocos = dia === null ? [] : montarBlocos(dia);

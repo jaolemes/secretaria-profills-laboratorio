@@ -233,6 +233,17 @@ describe("Meu dia", () => {
     expect(dia.sem_data.map((t) => t.id)).toEqual(["sem-data"]);
   });
 
+  test("tarefas_abertas conta toda tarefa aberta, a futura inclusive, e deixa as fechadas de fora", () => {
+    const tarefas = [
+      tarefa({ id: "futura", venceEm: "2026-11-12" as Dia }),
+      tarefa({ id: "hoje", venceEm: HOJE }),
+      tarefa({ id: "sem-data" }),
+      tarefa({ id: "feita", estado: "concluida" }),
+      tarefa({ id: "fora", estado: "descartada" }),
+    ];
+    expect(montarMeuDia(tarefas, CONECTORES_PARADOS, AGORA, HOJE).tarefas_abertas).toBe(3);
+  });
+
   test("a idade de cada fonte sai da última leitura do conector conectado", () => {
     const conectores: RetratoDosConectores = {
       ...CONECTORES_PARADOS,

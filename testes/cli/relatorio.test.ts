@@ -39,7 +39,7 @@ describe("relatorio pelo CLI com o servidor no ar e sem CRM", () => {
     expect(Object.keys(dados)).toEqual(["aviso", "periodo", "tarefas_concluidas", "atendimentos", "contagens"]);
     expect(dados.aviso).toBe(AVISO_DO_RELATORIO);
     expect(dados.periodo).toMatchObject({ padrao: true });
-    expect(dados.atendimentos).toEqual({ motivo: "crm_desconectado", erro: null, cortado: false, lido_em: null, dias: [] });
+    expect(dados.atendimentos).toEqual({ motivo: "crm_desconectado", erro: null, cortado: false, fora_por_cadastro_incompleto: null, lido_em: null, dias: [] });
     expect(dados.contagens).toEqual({ atendimentos: null, por_status: null, clientes_atendidos: null, tarefas_concluidas: 1 });
     expect(dados.tarefas_concluidas.map((t) => [t.id, t.titulo])).toEqual([[id, "Ligar"]]);
   });
@@ -86,6 +86,7 @@ describe("o texto do relatório", () => {
       motivo: null,
       erro: null,
       cortado: false,
+      fora_por_cadastro_incompleto: 0,
       lido_em: "2026-11-13T22:10:00.000Z",
       dias: [
         {
@@ -123,10 +124,17 @@ describe("o texto do relatório", () => {
     expect(vazio).toContain("Atendimentos no CRM: nenhum no período.");
   });
 
+  test("atendimentos de fora por cadastro incompleto: a contagem e o que o vendedor faz", () => {
+    expect(descrever({ ...base, atendimentos: { ...base.atendimentos, fora_por_cadastro_incompleto: 2 } })).toContain(
+      "Atendimentos de fora das contagens: 2 itens do CRM ficaram de fora por cadastro incompleto. Corrija o cadastro no CRM.",
+    );
+    expect(descrever(base)).not.toContain("cadastro incompleto");
+  });
+
   test("CRM falhou: a ação do erro e a espera, e a frase da parte local", () => {
     const texto = descrever({
       ...base,
-      atendimentos: { motivo: "crm_falhou", erro: { codigo: "crm_limite_de_chamadas", mensagem: "m", acao: "Espere e chame de novo, uma vez só.", esperaS: 30 }, cortado: false, lido_em: null, dias: [] },
+      atendimentos: { motivo: "crm_falhou", erro: { codigo: "crm_limite_de_chamadas", mensagem: "m", acao: "Espere e chame de novo, uma vez só.", esperaS: 30 }, cortado: false, fora_por_cadastro_incompleto: null, lido_em: null, dias: [] },
       contagens: { ...base.contagens, atendimentos: null, por_status: null, clientes_atendidos: null },
     });
     expect(texto).toContain("Atendimentos no CRM: não li, Espere e chame de novo, uma vez só. Espere 30 s.");

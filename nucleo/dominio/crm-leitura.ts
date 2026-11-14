@@ -107,6 +107,8 @@ export interface LeituraDoCrm<T> {
   readonly lidoEm: Instante;
   readonly itens: readonly T[];
   readonly cortado: boolean;
+  /** Itens que o CRM mandou com campo obrigatório vazio e ficaram de fora de `itens`. */
+  readonly foraPorCadastroIncompleto: number;
 }
 
 export interface LeiturasDoCrm {
@@ -128,6 +130,13 @@ export const SEM_ATENDIMENTO_MAXIMO_DIAS = 3650;
 export const AVISO_DO_PRAZO_DE_RETORNO =
   "Vencidos 30 dias do envio sem o retorno do cliente registrado na tela do CRM, o CRM bloqueia proposta nova sua para esse cliente.";
 
+/** A frase de `fora_por_cadastro_incompleto` para o vendedor, igual no painel e no CLI. `null` com zero. */
+export function fraseDoCadastroIncompleto(fora: number): string | null {
+  if (fora === 0) return null;
+  const quantos = fora === 1 ? "1 item do CRM ficou" : `${fora} itens do CRM ficaram`;
+  return `${quantos} de fora por cadastro incompleto. Corrija o cadastro no CRM.`;
+}
+
 /** Por que um bloco veio vazio. `sem_itens` é leitura feita e lista vazia. */
 export type MotivoDoBloco =
   | "sem_itens"
@@ -144,6 +153,8 @@ export interface BlocoDoCrm<I> {
   /** `null` quando há itens. */
   readonly motivo: MotivoDoBloco | null;
   readonly cortado: boolean;
+  /** Itens que o CRM mandou com campo obrigatório vazio: ficaram de fora, e o vendedor corrige o cadastro no CRM. */
+  readonly fora_por_cadastro_incompleto: number;
 }
 
 export interface PropostaAberta extends PropostaEnviada {
@@ -283,9 +294,9 @@ function motivoSemLeitura(crm: EstadoCrm): MotivoDoBloco {
 }
 
 function bloco<T, I>(leitura: LeituraDoCrm<T> | null, crm: EstadoCrm, converter: (item: T) => I): BlocoDoCrm<I> {
-  if (leitura === null) return { itens: [], lido_em: null, motivo: motivoSemLeitura(crm), cortado: false };
+  if (leitura === null) return { itens: [], lido_em: null, motivo: motivoSemLeitura(crm), cortado: false, fora_por_cadastro_incompleto: 0 };
   const itens = leitura.itens.map(converter);
-  return { itens, lido_em: leitura.lidoEm, motivo: itens.length === 0 ? "sem_itens" : null, cortado: leitura.cortado };
+  return { itens, lido_em: leitura.lidoEm, motivo: itens.length === 0 ? "sem_itens" : null, cortado: leitura.cortado, fora_por_cadastro_incompleto: leitura.foraPorCadastroIncompleto };
 }
 
 /** A leitura sem os itens ignorados. A lista que sobra vazia é `sem_itens`, como uma leitura vazia. */

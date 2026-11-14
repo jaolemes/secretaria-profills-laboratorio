@@ -149,9 +149,9 @@ function dia(campos: Partial<MeuDia> = {}, leituras: LeiturasDoCrm = SEM_LEITURA
 
 const LIDO = "2026-11-13T14:53:00.000Z" as Instante;
 const TUDO_LIDO: LeiturasDoCrm = {
-  agenda: { dia: HOJE, lidoEm: LIDO, cortado: false, itens: [compromisso(2, "18:30"), compromisso(1, "12:00")] },
-  propostas: { lidoEm: LIDO, cortado: false, itens: [enviada(10, 3), enviada(11, 29)] },
-  carteira: { lidoEm: "2026-11-13T14:40:00.000Z" as Instante, cortado: true, semAtendimentoHaDias: 30, itens: [daCarteira(80, null)] },
+  agenda: { dia: HOJE, lidoEm: LIDO, cortado: false, foraPorCadastroIncompleto: 0, itens: [compromisso(2, "18:30"), compromisso(1, "12:00")] },
+  propostas: { lidoEm: LIDO, cortado: false, foraPorCadastroIncompleto: 0, itens: [enviada(10, 3), enviada(11, 29)] },
+  carteira: { lidoEm: "2026-11-13T14:40:00.000Z" as Instante, cortado: true, foraPorCadastroIncompleto: 0, semAtendimentoHaDias: 30, itens: [daCarteira(80, null)] },
 };
 
 /** As conversas lidas e sem nada para mostrar: o WhatsApp não tem motivo para aparecer na linha discreta. */
@@ -201,7 +201,7 @@ describe("tabela de blocos", () => {
     expect(propostas?.conteudo).toEqual({ leitura: "nao_lido", fonte: "crm", motivo: "crm_app_nao_liberado" });
     expect(contador(propostas!.conteudo)).toEqual({ texto: "–", apagado: true, falado: "não lido" });
 
-    const vazio = dia({}, { agenda: null, propostas: { lidoEm: LIDO, cortado: false, itens: [] }, carteira: null });
+    const vazio = dia({}, { agenda: null, propostas: { lidoEm: LIDO, cortado: false, foraPorCadastroIncompleto: 0, itens: [] }, carteira: null });
     const lidasVazias = montarBlocos(vazio).find((b) => b.definicao.id === "propostas");
     expect(contador(lidasVazias!.conteudo)).toEqual({ texto: "0", apagado: true, falado: "0 itens" });
   });
@@ -221,6 +221,24 @@ describe("tabela de blocos", () => {
     expect(propostas?.conteudo).toMatchObject({ notas: ["2 ignoradas por 7 dias."] });
     expect(clientes?.conteudo).toMatchObject({ notas: ["O CRM tem mais do que a Secretária lê de uma vez. Confira a lista completa no CRM."] });
   });
+
+  test("cada bloco do CRM diz quantos itens ficaram de fora por cadastro incompleto; com zero, nada", () => {
+    const comFora: LeiturasDoCrm = {
+      agenda: { ...TUDO_LIDO.agenda!, foraPorCadastroIncompleto: 1 },
+      propostas: { ...TUDO_LIDO.propostas!, foraPorCadastroIncompleto: 2 },
+      carteira: { ...TUDO_LIDO.carteira!, cortado: false, foraPorCadastroIncompleto: 3 },
+    };
+    const blocos = montarBlocos(dia({}, comFora));
+    const notas = (id: string) => {
+      const conteudo = blocos.find((b) => b.definicao.id === id)?.conteudo;
+      return conteudo?.leitura === "lido" ? conteudo.notas : null;
+    };
+    expect(notas("fazer-hoje")).toEqual(["1 item do CRM ficou de fora por cadastro incompleto. Corrija o cadastro no CRM."]);
+    expect(notas("propostas")).toEqual(["2 itens do CRM ficaram de fora por cadastro incompleto. Corrija o cadastro no CRM."]);
+    expect(notas("sem-atendimento")).toEqual(["3 itens do CRM ficaram de fora por cadastro incompleto. Corrija o cadastro no CRM."]);
+    const semFora = montarBlocos(dia({}, { ...TUDO_LIDO, carteira: { ...TUDO_LIDO.carteira!, cortado: false } }));
+    expect(semFora.flatMap(({ conteudo }) => (conteudo.leitura === "lido" ? conteudo.notas : []))).toEqual([]);
+  });
 });
 
 describe("bloco escolhido", () => {
@@ -230,7 +248,7 @@ describe("bloco escolhido", () => {
   });
 
   test("tudo em zero dá Fazer hoje e o dia vazio", () => {
-    const blocos = montarBlocos(dia({}, { agenda: { dia: HOJE, lidoEm: LIDO, cortado: false, itens: [] }, propostas: { lidoEm: LIDO, cortado: false, itens: [] }, carteira: null }));
+    const blocos = montarBlocos(dia({}, { agenda: { dia: HOJE, lidoEm: LIDO, cortado: false, foraPorCadastroIncompleto: 0, itens: [] }, propostas: { lidoEm: LIDO, cortado: false, foraPorCadastroIncompleto: 0, itens: [] }, carteira: null }));
     expect(diaVazio(blocos)).toBe(false);
     const lidasVazias = { ...TUDO_LIDO, agenda: { ...TUDO_LIDO.agenda!, itens: [] }, propostas: { ...TUDO_LIDO.propostas!, itens: [] }, carteira: { ...TUDO_LIDO.carteira!, itens: [] } };
     expect(diaVazio(montarBlocos(dia({}, lidasVazias)))).toBe(false);

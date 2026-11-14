@@ -50,8 +50,10 @@ export interface Eventos<E> {
   readonly textos: string[];
   /** Resolve no primeiro evento, recebido ou futuro, que satisfaz `quando`. */
   ate(quando: (estado: E) => boolean, descricao: string): Promise<E>;
-  /** Resolve quando o texto cru do fluxo, de qualquer evento, contém `trecho`. */
-  ateTexto(trecho: string, descricao: string): Promise<void>;
+  /** Resolve quando o texto cru do fluxo, de qualquer evento, contém `trecho` pelo menos `vezes` vezes (uma, sem o número). */
+  ateTexto(trecho: string, descricao: string, vezes?: number): Promise<void>;
+  /** Quantas vezes `trecho` já apareceu no texto cru do fluxo. */
+  vezes(trecho: string): number;
   /** Resolve quando o servidor fecha o fluxo. */
   readonly fim: Promise<void>;
   fechar(): void;
@@ -62,7 +64,8 @@ function lerEventos<E>(resposta: Response, guardar: string[]): Eventos<E> {
   const recebidos: E[] = [];
   const textos: string[] = [];
   const esperas = new Set<{ quando: (estado: E) => boolean; resolver: (estado: E) => void }>();
-  const esperasDeTexto = new Set<{ trecho: string; resolver: () => void }>();
+  const esperasDeTexto = new Set<{ trecho: string; vezes: number; resolver: () => void }>();
+  const contar = (trecho: string) => textos.join("").split(trecho).length - 1;
   const leitor = resposta.body.getReader();
   const fim = (async () => {
     const decodificador = new TextDecoder();
@@ -75,9 +78,8 @@ function lerEventos<E>(resposta: Response, guardar: string[]): Eventos<E> {
         textos.push(texto);
         guardar.push(texto);
         resto += texto;
-        const lido = textos.join("");
         for (const espera of esperasDeTexto) {
-          if (lido.includes(espera.trecho)) {
+          if (contar(espera.trecho) >= espera.vezes) {
             esperasDeTexto.delete(espera);
             espera.resolver();
           }
@@ -124,11 +126,13 @@ function lerEventos<E>(resposta: Response, guardar: string[]): Eventos<E> {
         esperas.add(espera);
       });
     },
-    ateTexto(trecho, descricao) {
-      if (textos.join("").includes(trecho)) return Promise.resolve();
+    vezes: contar,
+    ateTexto(trecho, descricao, vezes = 1) {
+      if (contar(trecho) >= vezes) return Promise.resolve();
       return new Promise((resolver, rejeitar) => {
         const espera = {
           trecho,
+          vezes,
           resolver: () => {
             clearTimeout(limite);
             resolver();
@@ -145,14 +149,20 @@ function lerEventos<E>(resposta: Response, guardar: string[]): Eventos<E> {
   };
 }
 
-export async function subirPalco(alvos: Alvos = {}): Promise<Palco> {
+export interface OpcoesDoPalco {
+  /** A sincronização dos dois momentos do vendedor. Desligada no palco: só o teste dela liga. */
+  readonly sincronizacaoAutomatica?: boolean;
+}
+
+export async function subirPalco(alvos: Alvos = {}, opcoes: OpcoesDoPalco = {}): Promise<Palco> {
+  const doServidor = { sincronizacaoAutomatica: opcoes.sincronizacaoAutomatica ?? false };
   const bancada = montarBancada({ ...alvos, porta: 0 });
   // O cofre do teste é sempre o arquivo: o servidor nunca toca o chaveiro de quem roda o teste.
   definirBackendDoCofre(bancada.banco, "arquivo");
   bancada.banco.fechar();
   const vistoPeloAgente: string[] = [];
   const abertos: Eventos<unknown>[] = [];
-  let servidor = await iniciarServidor(bancada.ambiente);
+  let servidor = await iniciarServidor(bancada.ambiente, doServidor);
   let arquivo = lerArquivoDoServidor(caminhosDosDados(bancada.ambiente).servidor);
   if (arquivo === null) throw new Error("o servidor não gravou o servidor.json");
   let cookie = "";
@@ -208,7 +218,7 @@ export async function subirPalco(alvos: Alvos = {}): Promise<Palco> {
       for (const eventos of abertos.splice(0)) eventos.fechar();
       await servidor.parar();
       parado?.();
-      servidor = await iniciarServidor(bancada.ambiente);
+      servidor = await iniciarServidor(bancada.ambiente, doServidor);
       arquivo = lerArquivoDoServidor(caminhosDosDados(bancada.ambiente).servidor);
     },
     async limpar() {

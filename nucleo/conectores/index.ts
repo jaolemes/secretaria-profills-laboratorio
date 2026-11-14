@@ -1,7 +1,8 @@
 import type { Ambiente } from "../ambiente";
-import type { BancoAberto } from "../banco";
+import { lidoEmDasContas, type BancoAberto } from "../banco";
 import type { Cofre, Segredo } from "../cofre";
 import {
+  decidirSincronizacaoAutomatica,
   falha,
   lerIdContaEmail,
   motivoDoPulo,
@@ -10,7 +11,10 @@ import {
   type Dia,
   type ContaEmailComEstado,
   type CorpoLido,
+  type DecisaoAutomatica,
   type ErroOperacao,
+  type GatilhoAutomatico,
+  type Instante,
   type EstadoCrm,
   type EstadoDoEmail,
   type EstadoPorConector,
@@ -34,7 +38,7 @@ import { lerAtendimentos } from "./atendimentos";
 import { criarCascaCrm } from "./crm/casca";
 import type { Dependencias } from "./dependencias";
 import { criarContasDeEmail } from "./email/contas";
-import { criarSincronizador, type AndamentoDaSincronizacao, type OpcoesDaSincronizacao, type Sincronizacao } from "./sincronizacao";
+import { criarSincronizador, esperaPedidaNaRodada, type AndamentoDaSincronizacao, type OpcoesDaSincronizacao, type Sincronizacao } from "./sincronizacao";
 import { temporizadorPadrao, type Temporizador } from "./motor";
 import { criarCascaWhatsapp, type OpcoesDasConversas } from "./whatsapp/casca";
 
@@ -109,6 +113,11 @@ export interface Conectores {
   tokenValidoDoCrm(): Promise<Segredo | null>;
   /** Lê o CRM agora e guarda no cache. Uma rodada por vez: o pedido no meio de uma rodada recebe o resultado dela. */
   sincronizar(opcoes?: OpcoesDaSincronizacao): Promise<Sincronizacao>;
+  /**
+   * O vendedor abriu o painel. Depois da reconciliação de boot, sincroniza se `decidirSincronizacaoAutomatica`
+   * mandar e devolve a decisão sem esperar a rodada. A rodada que o conector dispara ao conectar sai daqui de dentro, sem chamada.
+   */
+  sincronizarAoAbrirOPainel(): Promise<DecisaoAutomatica>;
   /** O que a última sincronização guardou. Não chama o CRM. */
   leiturasDoCrm(): LeiturasDoCrm;
   /** A última leitura das conversas do WhatsApp. Não chama o wacli nem o CRM. `null` sem leitura. */
@@ -156,6 +165,11 @@ export interface OpcoesDosConectores {
   readonly limites?: { readonly tetoDeEmailPorPasta?: number; readonly prazoDaRodadaMs?: number };
   /** Prazo de `atendimentosDesde`, em ms. O padrão é 60 s. */
   readonly prazoDosAtendimentosMs?: number;
+  /**
+   * Os dois gatilhos de `decidirSincronizacaoAutomatica`. Ligado por padrão. Desligado, conectar não sincroniza, e
+   * `sincronizarAoAbrirOPainel` devolve a decisão sem rodar: o teste que conecta como preparação não ganha rodada.
+   */
+  readonly sincronizacaoAutomatica?: boolean;
 }
 
 /**
@@ -221,9 +235,94 @@ export function criarConectores(ambiente: Ambiente, banco: BancoAberto, cofre: C
     },
   });
   const motores = () => [whatsapp.motor, crm.motor, ...email.motores()];
+  const pronto = Promise.all([whatsapp.reconciliar(), crm.reconciliar(), email.reconciliar()]).then(() => {});
 
   function estado(): RetratoDosConectores {
     return { whatsapp: whatsapp.motor.estado(), crm: crm.motor.estado(), email: email.estado() };
+  }
+
+  /** Só em memória: depois de um reinício, a primeira abertura do painel decide pelo `lido_em` das fontes. */
+  let ultimaRodada: { readonly iniciadaEm: Instante; readonly esperarAte: Instante | null } | null = null;
+  /** Assenta quando a rodada que roda agora termina, de qualquer origem. `null` sem rodada. */
+  let emVoo: Promise<void> | null = null;
+  /**
+   * A conexão que chegou com uma rodada em voo, que pode ter começado antes dela e pulado a fonte dela. Uma vaga só:
+   * as conexões que chegam durante a mesma rodada viram uma rodada depois dela.
+   */
+  let conexaoNaFila: GatilhoAutomatico | null = null;
+
+  function sincronizar(opcoes?: OpcoesDaSincronizacao): Promise<Sincronizacao> {
+    const rodada = sincronizador.sincronizar(opcoes).then((feita) => {
+      ultimaRodada = { iniciadaEm: feita.iniciadaEm, esperarAte: esperaPedidaNaRodada(feita) };
+      return feita;
+    });
+    // Quem pediu a rodada recebe a rejeição dela; a marca só diz que ela terminou.
+    const terminou = rodada.then(
+      () => {},
+      () => {},
+    );
+    emVoo = terminou;
+    void terminou.then(() => {
+      if (emVoo === terminou) emVoo = null;
+    });
+    return rodada;
+  }
+
+  function decidir(gatilho: GatilhoAutomatico): DecisaoAutomatica {
+    return decidirSincronizacaoAutomatica({ gatilho, agora: ambiente.agora(), ultimaRodadaEm: ultimaRodada?.iniciadaEm ?? null, esperarAte: ultimaRodada?.esperarAte ?? null });
+  }
+
+  /** Roda se a decisão mandar. A decisão é tomada na hora de começar, com a última rodada e a espera do CRM já contadas. */
+  async function rodarSeDecidir(gatilho: GatilhoAutomatico): Promise<void> {
+    const decisao = decidir(gatilho);
+    if (!decisao.dispara) {
+      registro.info("sincronizacao.automatica_segurada", { motivo: decisao.motivo });
+      return;
+    }
+    if (parando !== null) return;
+    await sincronizar();
+  }
+
+  /** A conexão espera a rodada em voo e entra na vaga; quem acha a vaga ocupada deixa a rodada para quem a tem. */
+  async function rodarPorConexao(gatilho: GatilhoAutomatico): Promise<void> {
+    if (conexaoNaFila !== null) {
+      conexaoNaFila = gatilho;
+      return;
+    }
+    let proximo = gatilho;
+    while (emVoo !== null) {
+      conexaoNaFila = proximo;
+      await emVoo;
+      proximo = conexaoNaFila ?? proximo;
+      conexaoNaFila = null;
+    }
+    await rodarSeDecidir(proximo);
+  }
+
+  /**
+   * O fim da rodada automática, que ninguém espera. O que chega aqui é a escrita do registro que falhou (disco cheio,
+   * pasta sem permissão) ou uma rodada que rejeitou: fica no registro de erro, e o servidor segue de pé.
+   */
+  function automaticaFalhou(erro: unknown): void {
+    registro.erro("sincronizacao.automatica_falhou", { erro: erro instanceof Error ? erro.name : typeof erro });
+  }
+
+  const automatica = opcoes.sincronizacaoAutomatica ?? true;
+  if (automatica) {
+    let retratoAnterior = estado();
+    ouvintes.add((depois) => {
+      const gatilho: GatilhoAutomatico = { tipo: "conectores_mudaram", antes: retratoAnterior, depois };
+      retratoAnterior = depois;
+      const decisao = decidir(gatilho);
+      if (!decisao.dispara || decisao.motivo !== "conectou") return;
+      // A senha da conta de e-mail e o espelho do WhatsApp entram nos efeitos, depois da fase: a rodada espera os efeitos assentarem.
+      void Promise.all(motores().map((motor) => motor.assentar()))
+        .then(() => {
+          registro.info("sincronizacao.automatica", { motivo: decisao.motivo, conector: decisao.conector });
+          return rodarPorConexao(gatilho);
+        })
+        .catch(automaticaFalhou);
+    });
   }
 
   const comUrl = <E>(resultado: Resultado<E>) => (resultado.ok ? ok({ estado: resultado.dados, urlAutorizacao: null }) : resultado);
@@ -245,7 +344,7 @@ export function criarConectores(ambiente: Ambiente, banco: BancoAberto, cofre: C
   }
 
   return {
-    pronto: Promise.all([whatsapp.reconciliar(), crm.reconciliar(), email.reconciliar()]).then(() => {}),
+    pronto,
     estado,
     agir: (id, acao, dados) => seguro(`${id}.${acao}`, () => acoes[id](acao, dados)),
     email: {
@@ -268,7 +367,27 @@ export function criarConectores(ambiente: Ambiente, banco: BancoAberto, cofre: C
       const token = await seguro("crm.token", async () => ok(await crm.tokenValido()));
       return token.ok ? token.dados : null;
     },
-    sincronizar: (opcoes) => sincronizador.sincronizar(opcoes),
+    sincronizar,
+    async sincronizarAoAbrirOPainel() {
+      await pronto;
+      const { agenda, propostas, carteira } = sincronizador.leituras();
+      const decisao = decidir({
+        tipo: "painel_aberto",
+        conectores: estado(),
+        lidoEm: {
+          agenda: agenda?.lidoEm ?? null,
+          propostas: propostas?.lidoEm ?? null,
+          carteira: carteira?.lidoEm ?? null,
+          conversas: sincronizador.conversas()?.lidoEm ?? null,
+          email: lidoEmDasContas(banco),
+        },
+      });
+      if (decisao.dispara && decisao.motivo !== "conectou" && automatica && parando === null) {
+        registro.info("sincronizacao.automatica", { motivo: decisao.motivo, fonte: decisao.fonte });
+        void sincronizar().catch(automaticaFalhou);
+      }
+      return decisao;
+    },
     leiturasDoCrm: () => sincronizador.leituras(),
     leituraDeConversas: () => sincronizador.conversas(),
     assinarSincronizacao(ouvinte) {

@@ -33,9 +33,10 @@ import {
   type VisaoDoEmail,
 } from "../dominio";
 import type { EstadoDaAtualizacao, Impedimento, VersaoPublicada } from "../atualizacao";
+import { haAtualizacaoPendente, recuperar } from "../atualizador";
 import type { ResultadoDaFonte, Sincronizacao } from "../conectores";
 import { ESTADOS_DA_ESCRITA, TOOLS_DE_ESCRITA, type CartaoVisto, type ResumoDaEscrita, type ToolDeEscrita } from "../escritas";
-import { LIMITE_DO_CORPO, VERSAO_DO_NUCLEO, lerPidDoServidor, lerSistema, type AtualizacaoNoDiagnostico, type ContaNoDiagnostico, type Diagnostico, type ItemIgnorado, type RespostaDaTarefa } from "../servidor";
+import { LIMITE_DO_CORPO, VERSAO_DO_NUCLEO, lerPidDoServidor, lerSistema, type AtualizacaoNoDiagnostico, type ContaNoDiagnostico, type Diagnostico, type Info, type ItemIgnorado, type RespostaDaTarefa } from "../servidor";
 import { ESTADOS_DA_TAREFA, NOMES_DOS_TITULOS_FIXOS, type IdadeDaFonte, type MeuDia, type Tarefa } from "../tarefas";
 import { acharServidor, type ClienteDoServidor } from "./cliente";
 import { destacar, encerrarPid, vivo } from "../processos";
@@ -215,10 +216,41 @@ async function forcarParada(ambiente: Ambiente): Promise<Resultado<{ parado: tru
   return ok({ parado: true, forcado: false });
 }
 
-/** O link com bilhete vai só para o navegador. Sem navegador, sai só a origem: quem lê a saída do CLI não entra no painel. */
-type DadosDoAbrir =
-  | { readonly navegador: true; readonly subiu: boolean }
-  | { readonly navegador: false; readonly subiu: boolean; readonly endereco: string };
+interface AtualizacaoDesfeita {
+  readonly de: string | null;
+  readonly para: string | null;
+}
+
+/**
+ * Uma atualização que morreu no meio deixa a pasta entre duas versões. Antes de subir o servidor,
+ * `abrir` termina a volta: o servidor que sobe depois é o da versão antiga.
+ */
+async function terminarAtualizacaoInterrompida(
+  ctx: ContextoDoCli,
+  ambiente: Ambiente,
+  servidor: Resultado<ClienteDoServidor>,
+): Promise<Resultado<AtualizacaoDesfeita | null>> {
+  if (!haAtualizacaoPendente(ctx.raizDoRepo)) return ok(null);
+  let versaoNoAr: string | null = null;
+  if (servidor.ok) {
+    const info = await servidor.dados.pedir<Info>("GET", "/api/info");
+    if (!info.ok) return ok(null);
+    versaoNoAr = info.dados.versaoNucleo;
+  }
+  const volta = await recuperar({ raizDoRepo: ctx.raizDoRepo, dirDados: ambiente.dirDados, versaoNoAr });
+  if (volta.tipo === "em_andamento") return falha("atualizacao_em_andamento");
+  if (volta.tipo === "banco_em_uso") return falha("servidor_preso", "Uma atualização parou no meio, e um processo ainda segura o banco da Secretária.");
+  if (volta.tipo === "falhou") return falha("interno", `Uma atualização parou no meio e não deu para voltar à versão anterior: ${volta.detalhe}`);
+  return ok(volta.tipo === "desfeita" ? { de: volta.de, para: volta.para } : null);
+}
+
+/**
+ * O link com bilhete vai só para o navegador. Sem navegador, sai só a origem: quem lê a saída do CLI não entra no painel.
+ * `atualizacaoDesfeita` só vem quando este `abrir` desfez uma atualização que tinha parado no meio.
+ */
+type DadosDoAbrir = ({ readonly navegador: true; readonly subiu: boolean } | { readonly navegador: false; readonly subiu: boolean; readonly endereco: string }) & {
+  readonly atualizacaoDesfeita?: AtualizacaoDesfeita;
+};
 
 /** O alvo da espera: um conector único, ou uma conta de e-mail pelo rótulo. */
 type Alvo = { readonly tipo: "conector"; readonly id: IdConectorUnico } | { readonly tipo: "email"; readonly rotulo: string };
@@ -953,20 +985,28 @@ export const COMANDOS: readonly Comando[] = [
     async executar({ semNavegador }, ctx) {
       const ambiente = ctx.ambiente();
       const achado = await acharServidor(ambiente);
+      const volta = await terminarAtualizacaoInterrompida(ctx, ambiente, achado);
+      if (!volta.ok) return volta;
+      const desfeita = volta.dados === null ? {} : { atualizacaoDesfeita: volta.dados };
       const servidor = achado.ok ? ok({ cliente: achado.dados, subiu: false }) : await subirServidor(ctx, ambiente);
       if (!servidor.ok) return servidor;
       const { cliente, subiu } = servidor.dados;
-      if (semNavegador) return ok({ navegador: false, subiu, endereco: `${cliente.arquivo.origem}/` });
+      if (semNavegador) return ok({ navegador: false, subiu, endereco: `${cliente.arquivo.origem}/`, ...desfeita });
       const bilhete = await cliente.pedir<{ url: string }>("POST", "/api/sessoes/bilhete");
       if (!bilhete.ok) return bilhete;
       const aberto = await abrirNoNavegador(bilhete.dados.url, ambiente.navegador);
       if (!aberto.abriu) return falha("navegador_nao_abriu", `O navegador não abriu: ${aberto.motivo}.`);
-      return ok({ navegador: true, subiu });
+      return ok({ navegador: true, subiu, ...desfeita });
     },
-    descrever: (dados) =>
-      dados.navegador
-        ? "Abri o painel no navegador do vendedor. Se a janela não abriu, peça a ele que rode `bun secretaria abrir` no terminal dele."
-        : `O servidor está de pé em ${dados.endereco}. O vendedor entra no painel rodando \`bun secretaria abrir\` no terminal dele.`,
+    descrever(dados) {
+      const desfeita =
+        dados.atualizacaoDesfeita === undefined
+          ? ""
+          : `Uma atualização da Secretária parou no meio e foi desfeita: ela segue na versão ${dados.atualizacaoDesfeita.de ?? "anterior"}. Avise o vendedor.\n`;
+      return dados.navegador
+        ? `${desfeita}Abri o painel no navegador do vendedor. Se a janela não abriu, peça a ele que rode \`bun secretaria abrir\` no terminal dele.`
+        : `${desfeita}O servidor está de pé em ${dados.endereco}. O vendedor entra no painel rodando \`bun secretaria abrir\` no terminal dele.`;
+    },
   }),
   definir<{ forcar: boolean }, { parado: true; forcado: boolean }>({
     nome: "parar",

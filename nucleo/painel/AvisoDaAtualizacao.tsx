@@ -144,7 +144,7 @@ export function AvisoNoCartao({ aviso, ocupado, agir }: { aviso: AvisoDaAtualiza
   const id = useId();
   const { botao, trava, progresso } = aviso;
   return (
-    <div aria-live="polite" className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b px-3 pt-2.5 pb-[11px]">
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b px-3 pt-2.5 pb-[11px]">
       <div className="flex min-w-0 flex-[1_1_130px] flex-col gap-0.5">
         <p className="flex items-center gap-[7px] text-[13px] font-semibold text-foreground">
           <SimboloDaAtualizacao icone={aviso.icone} />

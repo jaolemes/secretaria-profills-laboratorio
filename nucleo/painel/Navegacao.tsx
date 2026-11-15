@@ -272,7 +272,10 @@ function CartaoDoPe({ conexoes, quem, atualizacao }: { conexoes: ConexoesDaLater
           {vista !== null && <LinhaDaVersao vista={vista} />}
         </div>
       </div>
-      {vista?.aviso && <AvisoNoCartao aviso={vista.aviso} ocupado={atualizacao.ocupado} agir={atualizacao.agir} />}
+      {/* Leitor de tela costuma não anunciar uma região que entra no DOM já com o texto. */}
+      <div aria-live="polite" data-regiao="atualizacao">
+        {vista?.aviso && <AvisoNoCartao aviso={vista.aviso} ocupado={atualizacao.ocupado} agir={atualizacao.agir} />}
+      </div>
       {quem !== null && <LinhaDeQuemUsa quem={quem.quem} abrir={quem.abrir} recolhida={false} comBorda />}
       <button
         type="button"

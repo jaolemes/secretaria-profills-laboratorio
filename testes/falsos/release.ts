@@ -49,6 +49,16 @@ export interface ReleaseFalsa {
   parar(): Promise<void>;
 }
 
+/** A fonte que aponta para uma release falsa em `origem`, também de dentro de outro processo. */
+export function fonteDaReleaseFalsa(origem: string, chaves: readonly ChavePublica[], prazoMs: number): FonteDasVersoes {
+  return {
+    endereco: new URL(`${origem}${CAMINHO}`),
+    chaves,
+    prazoMs,
+    pacote: (url) => new URL(url.startsWith(ORIGEM_CANONICA) ? `${origem}/releases/${url.slice(ORIGEM_CANONICA.length)}` : url),
+  };
+}
+
 export async function subirReleaseFalsa(): Promise<ReleaseFalsa> {
   const ativa = await gerarParDeChaves();
   const outra = await gerarParDeChaves();
@@ -95,12 +105,7 @@ export async function subirReleaseFalsa(): Promise<ReleaseFalsa> {
   return {
     endereco: new URL(`${origem}${CAMINHO}`),
     chaves,
-    fonte: (prazoMs = 300) => ({
-      endereco: new URL(`${origem}${CAMINHO}`),
-      chaves,
-      prazoMs,
-      pacote: (url) => new URL(url.startsWith(ORIGEM_CANONICA) ? `${origem}/releases/${url.slice(ORIGEM_CANONICA.length)}` : url),
-    }),
+    fonte: (prazoMs = 300) => fonteDaReleaseFalsa(origem, chaves, prazoMs),
     pedidos: () => pedidos,
     pedidosDoPacote: () => pedidosDoPacote,
     async publicar(versao, opcoes = {}) {

@@ -41,7 +41,8 @@ function problemasDaFrase(frase: string): string[] {
 }
 
 export function lerNovidades(texto: string): LeituraDeNovidades {
-  const casamento = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(texto.replaceAll("\r\n", "\n"));
+  if (new TextEncoder().encode(texto).length > MAXIMO_DE_BYTES) return { ok: false, problemas: [`o arquivo passa de ${MAXIMO_DE_BYTES} bytes`] };
+  const casamento = /^---\n([\s\S]*?)\n---(?:\n([\s\S]*))?$/.exec(texto.replace(/^﻿/, "").replaceAll("\r\n", "\n"));
   if (casamento === null) return { ok: false, problemas: ["falta o cabeçalho entre as linhas ---"] };
   const [, cabecalho = "", corpo = ""] = casamento;
   const problemas: string[] = [];

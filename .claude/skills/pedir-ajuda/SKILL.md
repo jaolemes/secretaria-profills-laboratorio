@@ -20,8 +20,10 @@ description: Tenta destravar a Secretária e, se não der, escreve um pedido de 
 3. Tente uma vez a saída que o próprio erro indica:
    - erro de comando: faça a `erro.acao`. Com `erro.esperaS`, espere esse tempo antes. Depois rode de novo o comando que falhou.
    - conector em `atencao`: siga a skill `secretaria-conectores` para o `estado.problema.codigo`. O que é do vendedor (botão no painel, senha, chaveiro do sistema) você pede a ele e espera.
+   - a atualização não deu certo: rode `bun secretaria atualizacao --json`. Em `falhou`, conte a `explicacao` e que a Secretária segue na versão `instalada`, funcionando, e que nada dele se perdeu. A saída é ele clicar em Tentar de novo, no cartão do pé da lateral, o das conexões; com o `motivo` `sem_internet`, ele confere a internet antes. Você não aplica a atualização. Com `bloqueio`, diga a `bloqueio.explicacao` e espere o que está ocupado terminar.
+   - o script de instalação parou: a última linha dele começa com "Para o suporte:" e traz o motivo. Faça o que a frase de antes dela diz, como conferir a internet ou fechar o que tem arquivo da pasta aberto, e peça que ele rode o script de novo.
 
-   Resolveu quando o comando que falhou responde `ok: true`, ou o conector sai de `atencao`. Diga ao vendedor que destravou e pare aqui.
+   Resolveu quando o comando que falhou responde `ok: true`, o conector sai de `atencao`, a atualização chega a `atualizado` ou o script termina sem a linha "Para o suporte:". Diga ao vendedor que destravou e pare aqui.
 4. Não resolveu: monte o pedido de ajuda (abaixo), mostre ao vendedor num bloco de texto e diga: "Copie este texto e mande para o suporte da Profills." Quem manda é ele: você só escreve o texto.
 
 ### Servidor que cai
@@ -45,6 +47,8 @@ CRM: <fase> <estado.problema.codigo, se houver>
 E-mail: <pulado | nenhuma conta | uma linha por conta: provedor, fase e estado.problema.codigo>
 
 Núcleo: <instalacao.versaoNucleo>
+Atualização: <atualizacao.fase> <atualizacao.versaoNova, se houver> <motivo, em falhou> <atualizacao.impedimento, se houver>
+Instalação pelo script: <motivo da linha "Para o suporte:", ou "não rodou">
 Sistema: <sistema.plataforma> <sistema.versao> (<sistema.arquitetura>)
 Bun: <sistema.bun>
 Cofre: <cofre>. wacli instalado: <wacli.existe>. Processos filhos: <quantos em processos>
@@ -59,6 +63,9 @@ Travas do CRM: <travas.faltando> de <quantas em travas.regras> faltando
 | `erro.codigo` | a resposta do comando que falhou |
 | `instalacao.versaoNucleo`, `sistema.plataforma`, `sistema.versao`, `sistema.arquitetura`, `sistema.bun`, `wacli.existe` | `diagnostico`, com ou sem a Secretária no ar |
 | `cofre`, `processos`, `backup`, `travas.faltando`, `travas.regras` | `diagnostico`, só com a Secretária no ar |
+| `atualizacao.fase`, `atualizacao.versaoNova`, `atualizacao.impedimento` | `diagnostico`, só com a Secretária no ar |
+| `motivo` da atualização | `atualizacao`, na fase `falhou` |
+| motivo da instalação | a linha "Para o suporte:" do script, só a palavra antes do parêntese |
 
 Em `darwin` (macOS), `sistema.versao` é a versão do kernel, não a do macOS. Copie como veio.
 
@@ -69,6 +76,7 @@ O pedido sai da máquina do vendedor. Ele leva só fases, códigos, versões e s
 - nome de cliente, telefone, endereço de e-mail (também o `endereco` da conta), texto de mensagem, texto do CRM, assunto de atendimento, título ou nota de tarefa;
 - os argumentos do comando que falhou (`--nota`, `--motivo`, `--telefone`, `--cliente-id`, o termo de busca do `wa`): entra só o nome do comando;
 - o `detalhe` do problema e a `erro.mensagem`: podem trazer texto de fora;
+- da atualização, o `oQueMuda` e a `explicacao`; do script, o que está entre parênteses na linha "Para o suporte:" e a pasta da instalação;
 - senha, token, código de pareamento e o link de entrada do painel;
 - caminhos da máquina: `servidor.dirDados`, `wacli.executavel`, `backup.arquivo`, que mostram o nome do usuário;
 - `servidor.origem`, `servidor.pid` e `instalacao.id`;

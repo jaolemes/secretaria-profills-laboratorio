@@ -10,13 +10,16 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { conferirPacote, escreverManifesto, extrairPacote, lerManifesto, montarPacote } from "../../nucleo/atualizacao";
-import { abrirExclusivo } from "../../nucleo/banco/abrir";
+import { abrirExclusivo, bancoEmUso } from "../../nucleo/banco/abrir";
 import { migrar } from "../../nucleo/banco/migrar";
 import { encerrarPid, vivo } from "../../nucleo/processos";
 
 type Arquivos = Readonly<Record<string, string | Uint8Array>>;
 
 const REPO = join(import.meta.dir, "..", "..");
+const BANCOS = ["secretaria.db", "meu.db"] as const;
+const PRAZO_DOS_BANCOS_MS = 10_000;
+const INTERVALO_DOS_BANCOS_MS = 25;
 /** Como o CLI de verdade, este só carrega com o `node_modules` no lugar. */
 const CLI = [
   `import "marca";`,
@@ -153,6 +156,7 @@ export interface InstalacaoMinima {
   /** O pid do servidor que anunciou o `servidor.json`, ou `null`. */
   pidDoServidor(): number | null;
   versaoNoAr(): Promise<string | null>;
+  /** Mata o servidor e volta com os dois bancos livres. */
   pararServidor(): Promise<void>;
   limpar(): Promise<void>;
 }
@@ -228,6 +232,14 @@ export function montarInstalacao(opcoes: { readonly naNova?: Arquivos } = {}): I
       const pid = instalacao.pidDoServidor();
       if (pid !== null && !(await encerrarPid(pid, { educado: false }))) throw new Error(`o servidor mínimo (pid ${pid}) não morreu`);
       rmSync(arquivoDoServidor, { force: true });
+      // O Windows solta o lock do banco depois que o processo morto some, e não avisa quando: só resta conferir o lock.
+      const fim = Date.now() + PRAZO_DOS_BANCOS_MS;
+      for (const banco of BANCOS) {
+        while (bancoEmUso(join(dirDados, banco))) {
+          if (Date.now() >= fim) throw new Error(`o ${banco} seguiu em uso por ${PRAZO_DOS_BANCOS_MS} ms depois de o servidor mínimo parar`);
+          await Bun.sleep(INTERVALO_DOS_BANCOS_MS);
+        }
+      }
     },
     async limpar() {
       await instalacao.pararServidor();

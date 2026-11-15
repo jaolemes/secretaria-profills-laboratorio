@@ -48,6 +48,14 @@ describe("instruções aos agentes", () => {
     expect(comLatest).toEqual([]);
   });
 
+  test("nenhum .md da skill shadcn manda rodar npx nem shadcn@latest", () => {
+    const pasta = join(SKILLS, "shadcn");
+    const arquivos = [...new Bun.Glob("**/*.md").scanSync(pasta)];
+    expect(arquivos.length).toBeGreaterThan(5);
+    const comDownload = arquivos.filter((arquivo) => /shadcn@latest|\bnpx\s+\S/.test(readFileSync(join(pasta, arquivo), "utf8")));
+    expect(comDownload).toEqual([]);
+  });
+
   // O registro do shadcn entrega componentes com `import { cn } from "cn"`. Sem o `cn` exato no
   // package.json, o import ainda compila com a cópia que o CLI traz, em outra versão.
   test("o pacote cn vem travado no package.json, sem clsx nem tailwind-merge", () => {

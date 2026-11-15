@@ -32,6 +32,8 @@ export interface Palco {
   readonly bancada: Bancada;
   readonly servidor: ServidorRodando;
   readonly arquivo: ArquivoDoServidor;
+  /** O cookie da aba do painel, para falar com um servidor que outro processo subiu na mesma pasta. */
+  readonly cookie: string;
   /** Corpo de toda resposta que o agente recebeu, para o teste do canário. */
   readonly vistoPeloAgente: string[];
   agente(caminho: string, init?: RequestInit): Promise<Response>;
@@ -156,7 +158,7 @@ export interface OpcoesDoPalco {
   readonly versoes?: FonteDasVersoes;
 }
 
-const SEM_RELEASE: FonteDasVersoes = { endereco: new URL("http://127.0.0.1:9/versao.json"), chaves: [], prazoMs: 300 };
+const SEM_RELEASE: FonteDasVersoes = { endereco: new URL("http://127.0.0.1:9/versao.json"), chaves: [], prazoMs: 300, pacote: () => new URL("http://127.0.0.1:9/pacote.tar.gz") };
 
 export async function subirPalco(alvos: Alvos = {}, opcoes: OpcoesDoPalco = {}): Promise<Palco> {
   const doServidor = { sincronizacaoAutomatica: opcoes.sincronizacaoAutomatica ?? false, versoes: opcoes.versoes ?? SEM_RELEASE };
@@ -199,6 +201,9 @@ export async function subirPalco(alvos: Alvos = {}, opcoes: OpcoesDoPalco = {}):
     bancada,
     get servidor() {
       return servidor;
+    },
+    get cookie() {
+      return cookie;
     },
     get arquivo() {
       if (arquivo === null) throw new Error("sem servidor.json");

@@ -244,7 +244,7 @@ export function lerAndamento(caminho: string): AndamentoLido {
   };
 }
 
-function gravarAndamento(caminho: string, andamento: Andamento): void {
+export function gravarAndamento(caminho: string, andamento: Andamento): void {
   mkdirSync(path.dirname(caminho), { recursive: true });
   const temporario = `${caminho}.${process.pid}.tmp`;
   writeFileSync(temporario, JSON.stringify(andamento));

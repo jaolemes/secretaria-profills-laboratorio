@@ -61,6 +61,20 @@ export function abrirBanco(caminho: string): BancoAberto {
   };
 }
 
+/**
+ * Segura um SQLite vazio como trava entre processos, do jeito que o atualizador segura a dele.
+ * `null`: outro processo vivo já a segura. O sistema solta o lock se este processo morrer.
+ */
+export function segurarTrava(caminho: string): { soltar(): void } | null {
+  try {
+    const sqlite = abrirExclusivo(caminho);
+    return { soltar: () => sqlite.close() };
+  } catch (erro) {
+    if (erro instanceof BancoEmUso) return null;
+    throw erro;
+  }
+}
+
 /** Algum processo segura este banco agora? Não cria o arquivo. */
 export function bancoEmUso(caminho: string): boolean {
   if (!existsSync(caminho)) return false;

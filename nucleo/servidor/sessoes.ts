@@ -13,6 +13,14 @@ export interface Sessoes {
   /** Troca o bilhete pelo valor do cookie `Set-Cookie`, ou `null` se ele já foi usado ou venceu. */
   trocarBilhete(bilhete: string): Promise<string | null>;
   valida(cookies: string | null): boolean;
+  /**
+   * Faz desta sessão a guardada no cofre, a única que o servidor seguinte aceita. É a aba que pediu
+   * a atualização: as outras pedem entrada nova depois do restart, também as que entram depois do clique.
+   * `false` quando o cookie não vale.
+   */
+  guardarParaORestart(cookies: string | null): Promise<boolean>;
+  /** A atualização falhou antes do restart: a sessão guardada volta a ser a da última entrada. */
+  soltarReserva(): Promise<void>;
 }
 
 function aleatorio(): string {
@@ -30,13 +38,14 @@ function vencimentoDe(valor: string): number | null {
  * dispensa revelar o valor guardado, e o guardado sobrevive a um restart, então a aba aberta
  * continua valendo depois que o servidor sobe de novo. O vencimento viaja dentro do valor: só
  * conta depois de o cookie bater com um valor emitido, então quem o adultera perde a sessão.
- * Cada bilhete troca a sessão guardada; as `TETO_DE_SESSOES` mais novas desta execução seguem valendo.
+ * Cada bilhete troca a sessão guardada, menos durante uma atualização; as `TETO_DE_SESSOES` mais novas desta execução seguem valendo.
  */
 export async function criarSessoes(cofre: Cofre, agora: () => number = Date.now): Promise<Sessoes> {
   const bilhetes = new Map<string, number>();
   const emitidas: Segredo[] = [];
   const guardada = await cofre.ler("servidor.chave_de_sessao");
   if (guardada !== null) emitidas.push(guardada);
+  let reservada = false;
 
   return {
     emitirBilhete() {
@@ -51,7 +60,7 @@ export async function criarSessoes(cofre: Cofre, agora: () => number = Date.now)
       if (venceEm === undefined || venceEm <= agora()) return null;
       const valor = `${(agora() + VIDA_DA_SESSAO_MS).toString(36)}.${aleatorio()}`;
       const sessao = Segredo.de(valor);
-      await cofre.gravar("servidor.chave_de_sessao", sessao);
+      if (!reservada) await cofre.gravar("servidor.chave_de_sessao", sessao);
       emitidas.push(sessao);
       emitidas.splice(0, emitidas.length - TETO_DE_SESSOES);
       return new Bun.Cookie(NOME_DO_COOKIE, valor, {
@@ -61,15 +70,31 @@ export async function criarSessoes(cofre: Cofre, agora: () => number = Date.now)
         maxAge: VIDA_DA_SESSAO_MS / 1000,
       }).serialize();
     },
-    valida(cookies) {
-      if (cookies === null) return false;
-      const valor = new Bun.CookieMap(cookies).get(NOME_DO_COOKIE);
-      if (valor === null || valor === "") return false;
-      const recebida = Segredo.de(valor);
-      // Sem atalho no primeiro acerto: a conta de comparações não depende de qual sessão bateu.
-      const emitida = emitidas.map((sessao) => sessao.igual(recebida)).includes(true);
-      const venceEm = vencimentoDe(valor);
-      return emitida && venceEm !== null && agora() < venceEm;
+    valida: (cookies) => sessaoValida(cookies) !== null,
+    async guardarParaORestart(cookies) {
+      const sessao = sessaoValida(cookies);
+      if (sessao === null) return false;
+      reservada = true;
+      await cofre.gravar("servidor.chave_de_sessao", sessao);
+      return true;
+    },
+    async soltarReserva() {
+      if (!reservada) return;
+      reservada = false;
+      const ultima = emitidas[emitidas.length - 1];
+      if (ultima !== undefined) await cofre.gravar("servidor.chave_de_sessao", ultima);
     },
   };
+
+  function sessaoValida(cookies: string | null): Segredo | null {
+    if (cookies === null) return null;
+    const valor = new Bun.CookieMap(cookies).get(NOME_DO_COOKIE);
+    if (valor === null || valor === "") return null;
+    const recebida = Segredo.de(valor);
+    // Sem atalho no primeiro acerto: a conta de comparações não depende de qual sessão bateu.
+    const iguais = emitidas.map((sessao) => sessao.igual(recebida));
+    const venceEm = vencimentoDe(valor);
+    if (!iguais.includes(true) || venceEm === null || agora() >= venceEm) return null;
+    return emitidas[iguais.indexOf(true)] ?? null;
+  }
 }

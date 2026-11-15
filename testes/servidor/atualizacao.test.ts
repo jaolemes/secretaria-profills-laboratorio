@@ -27,7 +27,7 @@ async function subir(opcoes: { readonly desenvolvimento?: boolean } = {}): Promi
   const r = (release = await subirReleaseFalsa());
   const dirRepo = (repo = mkdtempSync(join(tmpdir(), "secretaria-repo-")));
   if (opcoes.desenvolvimento) mkdirSync(join(dirRepo, ".git"));
-  const p = (palco = await subirPalco({ dirRepo }, { versoes: { endereco: r.endereco, chaves: r.chaves, prazoMs: 300 } }));
+  const p = (palco = await subirPalco({ dirRepo }, { versoes: r.fonte(300) }));
   return { p, r };
 }
 

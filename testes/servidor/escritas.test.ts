@@ -1055,6 +1055,7 @@ describe("uma gravação no CRM por vez, no servidor inteiro", () => {
     const conectado = { fase: "conectado", conexaoExpiraEm: b.ambiente.agora(), verificadoEm: b.ambiente.agora(), ferramentas: 18 };
     const rotas = montarRotasDeEscritas({
       banco: b.banco,
+      aplicador: { recusaDuranteAAtualizacao: () => null },
       conectores: {
         estado: () => ({ crm: conectado }) as unknown as RetratoDosConectores,
         conferirCliente: async () => ({ tipo: "nao_conferido", motivo: "crm_desconectado" }),

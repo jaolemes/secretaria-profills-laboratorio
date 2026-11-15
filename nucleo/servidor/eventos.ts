@@ -26,6 +26,8 @@ export interface Publicador {
   tarefasMudaram(): void;
   /** Um passo da sincronização, igual para o painel e o agente. Não leva dado do CRM: quem quer o dado recarrega o Meu dia. */
   sincronizacao(andamento: AndamentoDaSincronizacao): void;
+  /** O estado da atualização mudou de passo. Cada visão recebe o seu: o agente, com o O que muda citado como dado. */
+  atualizacao(porVisao: { readonly [V in Visao]: unknown }): void;
   /** Corpo do SSE. O primeiro evento é o retrato atual. */
   assinar(visao: Visao): ReadableStream<Uint8Array>;
   /** Fecha todos os fluxos abertos. Assinatura depois disso já nasce fechada. */
@@ -91,6 +93,11 @@ export function criarPublicador(retrato: () => EstadoPainel, relogio: Relogio = 
       if (fechado) return;
       const texto = `event: sincronizacao\ndata: ${JSON.stringify(andamento)}\n\n`;
       for (const fluxo of fluxos) if (!escrever(fluxo.controle, texto)) fluxos.delete(fluxo);
+    },
+    atualizacao(porVisao) {
+      if (fechado) return;
+      const textos = { painel: `event: atualizacao\ndata: ${JSON.stringify(porVisao.painel)}\n\n`, agente: `event: atualizacao\ndata: ${JSON.stringify(porVisao.agente)}\n\n` };
+      for (const fluxo of fluxos) if (!escrever(fluxo.controle, textos[fluxo.visao])) fluxos.delete(fluxo);
     },
     assinar(visao) {
       let meu: { readonly visao: Visao; readonly controle: ReadableStreamDefaultController<Uint8Array> } | null = null;

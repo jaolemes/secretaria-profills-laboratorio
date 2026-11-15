@@ -259,8 +259,22 @@ export const ERROS = {
     acao: "Peça ao seu agente para reiniciar a Secretária.",
     acaoDoAgente: "Rode `bun secretaria parar --forcar` e depois `bun secretaria abrir`.",
   },
+  sem_versao_nova: {
+    http: 409,
+    saida: 1,
+    mensagem: "Não há versão nova da Secretária para instalar.",
+    acao: "A Secretária já está na versão mais nova que ela conferiu.",
+    acaoDoAgente: "Leia o estado com `bun secretaria atualizacao`.",
+  },
+  atualizacao_bloqueada: {
+    http: 409,
+    saida: 1,
+    mensagem: "Agora não dá para atualizar a Secretária.",
+    acao: "Veja o motivo no aviso da atualização e tente de novo depois.",
+    acaoDoAgente: "O motivo está em `erro.atual.bloqueio.explicacao`. Atualizar é do vendedor, no painel.",
+  },
   atualizacao_em_andamento: {
-    http: null,
+    http: 409,
     saida: 1,
     mensagem: "A Secretária está se atualizando.",
     acao: "Espere um minuto e peça ao seu agente para abrir a Secretária de novo.",

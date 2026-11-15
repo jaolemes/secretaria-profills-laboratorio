@@ -57,7 +57,7 @@ export interface DependenciasDoAplicador {
   readonly banco: BancoAberto;
   readonly conectores: Pick<Conectores, "estado" | "assinarSincronizacao">;
   readonly supervisor: Supervisor;
-  readonly sessoes: Pick<Sessoes, "guardarParaORestart">;
+  readonly sessoes: Pick<Sessoes, "guardarParaORestart" | "soltarReserva">;
   readonly registro: Registro;
   /** Quando este servidor subiu. */
   readonly subiuEm: Instante;
@@ -81,6 +81,7 @@ async function esperarAte(condicao: () => boolean, prazoMs: number): Promise<boo
 /** Lê o pacote até o tamanho que o manifesto diz, mais um byte: o que passa disso já não confere. */
 async function baixarPacote(endereco: URL, bytes: number): Promise<Uint8Array | null> {
   try {
+    // O redirecionamento segue para qualquer host de propósito: o GitHub já trocou o host dos arquivos, e o que vale é a assinatura e o sha256.
     const resposta = await fetch(endereco, { signal: AbortSignal.timeout(PRAZO_DO_PACOTE_MS) });
     if (resposta.status !== 200 || resposta.body === null) {
       await resposta.body?.cancel();
@@ -236,7 +237,7 @@ export function criarAplicador(deps: DependenciasDoAplicador): Aplicador {
     const passo = (proximo: PassoDaAplicacao) => mudar({ tipo: "em_curso", para, passo: proximo });
     let entregue = false;
     try {
-      await deps.sessoes.guardarParaORestart(cookies);
+      if (!(await deps.sessoes.guardarParaORestart(cookies))) throw new FalhaDaAplicacao("falha_interna", "a sessão da aba não vale mais");
       await baixarEExtrair(para);
       passo("instalando");
       await instalarDependencias();
@@ -247,7 +248,10 @@ export function criarAplicador(deps: DependenciasDoAplicador): Aplicador {
       deps.pedirParada();
     } catch (erro) {
       // Com o atualizador no comando, a `nova/` é dele.
-      if (!entregue) apagarNova();
+      if (!entregue) {
+        apagarNova();
+        await deps.sessoes.soltarReserva().catch(() => deps.registro.aviso("atualizacao.sessao_nao_voltou", {}));
+      }
       const motivo = erro instanceof FalhaDaAplicacao ? erro.motivo : "falha_interna";
       // O detalhe da falha nossa vai ao registro; do erro inesperado, só o nome, como no resto do servidor.
       deps.registro.aviso("atualizacao.falhou", { motivo, detalhe: erro instanceof FalhaDaAplicacao ? erro.message.slice(0, 500) : erro instanceof Error ? erro.name : typeof erro });

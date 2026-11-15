@@ -230,7 +230,7 @@ export function lerAndamento(caminho: string): AndamentoLido {
   }
   let contagem: Andamento["mudados"] = null;
   if (mudados !== null) {
-    if (!ehObjeto(mudados) || typeof mudados.quantos !== "number" || !Array.isArray(mudados.caminhos)) return { tipo: "ilegivel" };
+    if (!ehObjeto(mudados) || !Number.isSafeInteger(mudados.quantos) || (mudados.quantos as number) < 0 || !Array.isArray(mudados.caminhos)) return { tipo: "ilegivel" };
     contagem = { quantos: mudados.quantos as number, caminhos: (mudados.caminhos as unknown[]).filter((item): item is string => typeof item === "string") };
   }
   let motivoDaFalha: Andamento["falha"] = null;
@@ -318,6 +318,7 @@ function tipoDe(caminho: string): "arquivo" | "link" | "outro" | null {
 }
 
 const ehArquivo = (caminho: string) => tipoDe(caminho) === "arquivo";
+const ehLink = (caminho: string) => tipoDe(caminho) === "link";
 
 /** As operações sobre uma instalação. Tudo aqui chega ao mesmo fim se rodar de novo. */
 function operacoes(raizDoRepo: string, dirDados: string, prazos: Prazos, efeitos: Efeitos) {
@@ -357,6 +358,7 @@ function operacoes(raizDoRepo: string, dirDados: string, prazos: Prazos, efeitos
     const noRepo = em(raizDoRepo, troca.caminho);
     const naNova = em(caminhos.nova, troca.caminho);
     const naAnterior = em(caminhos.anterior, troca.caminho);
+    if (ehLink(naNova)) throw new Falha("troca_falhou", `${troca.caminho} da versão nova é um link`);
     if (troca.tinhaAntiga && !existsSync(naAnterior)) {
       if (ehArquivo(noRepo) && ehArquivo(naNova)) await copiarArquivo(noRepo, naAnterior);
       else {
@@ -406,7 +408,8 @@ function operacoes(raizDoRepo: string, dirDados: string, prazos: Prazos, efeitos
   return {
     caminhos,
 
-    bancosLivres: () => efeitos.bancoLivre(caminhos.banco),
+    /** Os dois bancos, o do núcleo e o do vendedor, porque a volta devolve as cópias dos dois. */
+    bancosLivres: () => efeitos.bancoLivre(caminhos.banco) && efeitos.bancoLivre(caminhos.bancoDoVendedor),
 
     /** Confere a versão nova, monta o plano e conta o que o agente do vendedor mudou no núcleo. Não muda nada além de limpar `anterior/`. */
     preparar(): Pick<Andamento, "trocas" | "mudados"> {
@@ -651,8 +654,12 @@ export type Recuperacao =
   | { readonly tipo: "concluida"; readonly de: string | null; readonly para: string | null }
   | { readonly tipo: "desfeita"; readonly de: string | null; readonly para: string | null }
   | { readonly tipo: "banco_em_uso" }
+  /** Um servidor responde sobre uma pasta que a atualização pode ter deixado pela metade. A volta só roda com ele parado. */
+  | { readonly tipo: "servidor_no_meio"; readonly versaoNoAr: string }
   | { readonly tipo: "falhou"; readonly detalhe: string };
 
+/** Nas fases antes da troca, a pasta e os bancos ainda são os da versão antiga. */
+const ANTES_DA_TROCA: readonly Fase[] = ["esperar_banco", "preparar", "copiar"];
 /** As fases em que a pasta pode estar rasgada, com uma entrada fora do lugar. */
 const RASGAM: readonly Fase[] = ["trocar", "desfazer"];
 
@@ -692,10 +699,18 @@ export async function recuperar(
     const gravar = (mudanca: Partial<Andamento>) => regravar(caminhos.andamento, andamento, mudanca, efeitos);
     const falha = falhaDaQueda(andamento);
     if (opcoes.versaoNoAr !== null) {
-      // Com um servidor no ar, a pasta não muda. Se ele já é o da versão nova, a atualização deu certo.
-      if (andamento.fase !== "subir" || opcoes.versaoNoAr !== para) return { tipo: "nada" };
-      gravar({ fase: "concluido" });
-      return { tipo: "concluida", de, para };
+      // O servidor grava o `preparado` ainda no ar, antes de subir o atualizador e parar.
+      if (andamento.fase === "preparado") return { tipo: "nada" };
+      if (andamento.fase === "subir" && opcoes.versaoNoAr === para) {
+        gravar({ fase: "concluido" });
+        return { tipo: "concluida", de, para };
+      }
+      // Antes da troca nada mudou de lugar: o servidor no ar é o da versão antiga, e só falta gravar o fim.
+      if (ANTES_DA_TROCA.includes(andamento.fase)) {
+        gravar({ fase: "desfeito", falha });
+        return { tipo: "desfeita", de, para };
+      }
+      return { tipo: "servidor_no_meio", versaoNoAr: opcoes.versaoNoAr };
     }
     if (!ops.bancosLivres()) return { tipo: "banco_em_uso" };
     if (andamento.fase !== "desfazer") gravar({ fase: "desfazer", falha });

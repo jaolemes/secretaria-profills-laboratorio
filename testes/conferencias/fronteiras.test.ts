@@ -9,10 +9,10 @@ type Caminho = string;
 
 const EXTENSOES = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"];
 
-/** Onde cada API só pode aparecer. Arquivos de teste ficam de fora: eles sobem processos e revelam canários. */
 /** O atualizador roda sozinho enquanto o resto do núcleo muda de lugar: ele não pode importar o banco nem os processos. */
 const ATUALIZADOR = "nucleo/atualizador/main.ts";
 
+/** Onde cada API só pode aparecer. Arquivos de teste ficam de fora: eles sobem processos e revelam canários. */
 const DONOS_DE_API: readonly { readonly padrao: RegExp; readonly nome: string; readonly donos: readonly string[] }[] = [
   { padrao: /from\s*["']bun:sqlite["']/, nome: "bun:sqlite", donos: ["nucleo/banco/", ATUALIZADOR] },
   { padrao: /\bBun\.spawn/, nome: "Bun.spawn", donos: ["nucleo/processos/"] },

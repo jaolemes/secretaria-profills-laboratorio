@@ -240,6 +240,7 @@ async function terminarAtualizacaoInterrompida(
   const volta = await recuperar({ raizDoRepo: ctx.raizDoRepo, dirDados: ambiente.dirDados, versaoNoAr });
   if (volta.tipo === "em_andamento") return falha("atualizacao_em_andamento");
   if (volta.tipo === "banco_em_uso") return falha("servidor_preso", "Uma atualização parou no meio, e um processo ainda segura o banco da Secretária.");
+  if (volta.tipo === "servidor_no_meio") return falha("servidor_preso", `Uma atualização parou no meio, e um servidor da versão ${volta.versaoNoAr} está no ar sobre a pasta.`);
   if (volta.tipo === "falhou") return falha("interno", `Uma atualização parou no meio e não deu para voltar à versão anterior: ${volta.detalhe}`);
   return ok(volta.tipo === "desfeita" ? { de: volta.de, para: volta.para } : null);
 }

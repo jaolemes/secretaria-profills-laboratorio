@@ -175,26 +175,6 @@ export async function iniciarServidor(ambiente: Ambiente, opcoes: OpcoesDoServid
     const info: Info = { app: "secretaria-profills", versaoNucleo: versaoDoNucleo, idInstalacao: dados.id };
     const fonte = opcoes.versoes ?? FONTE_DAS_VERSOES;
     const descoberta = criarDescoberta({ banco, registro, fonte, instalada: versaoDoNucleo, dirRepo: ambiente.dirRepo, agora: ambiente.agora });
-    let parar: () => Promise<void> = () => Promise.resolve();
-    const pedirParada = () => {
-      setTimeout(() => void parar(), 0);
-    };
-    const aplicador = criarAplicador({
-      descoberta,
-      fonte,
-      instalada: versaoDoNucleo,
-      dirRepo: ambiente.dirRepo,
-      dirDados: ambiente.dirDados,
-      banco,
-      conectores: ligados,
-      supervisor,
-      sessoes,
-      registro,
-      subiuEm: ambiente.agora(),
-      agora: ambiente.agora,
-      aoMudar: (estado) => publicando.atualizacao({ painel: estado, agente: estadoPara(estado, "agente") }),
-      pedirParada,
-    });
     const diagnostico = (): Diagnostico => {
       const estados = ligados.estado();
       const painelAtual = retrato();
@@ -235,7 +215,7 @@ export async function iniciarServidor(ambiente: Ambiente, opcoes: OpcoesDoServid
       avisarParado = resolver;
     });
     const ouvindo = servidor;
-    parar = (): Promise<void> => {
+    const parar = (): Promise<void> => {
       parando ??= (async () => {
         registro.info("servidor.parando", {});
         await ligados.parar();
@@ -253,6 +233,25 @@ export async function iniciarServidor(ambiente: Ambiente, opcoes: OpcoesDoServid
       })();
       return parando;
     };
+    const pedirParada = () => {
+      setTimeout(() => void parar(), 0);
+    };
+    const aplicador = criarAplicador({
+      descoberta,
+      fonte,
+      instalada: versaoDoNucleo,
+      dirRepo: ambiente.dirRepo,
+      dirDados: ambiente.dirDados,
+      banco: aberto,
+      conectores: ligados,
+      supervisor,
+      sessoes,
+      registro,
+      subiuEm: ambiente.agora(),
+      agora: ambiente.agora,
+      aoMudar: (estado) => publicando.atualizacao({ painel: estado, agente: estadoPara(estado, "agente") }),
+      pedirParada,
+    });
 
     const rotas = montarRotas({
       guarda,

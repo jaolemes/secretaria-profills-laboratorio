@@ -173,7 +173,7 @@ export async function instalarPelaVersao(opcoes: OpcoesDaInstalacao): Promise<De
   if (versaoMaior(manifesto.bunMinimo, Bun.version)) return recusar("bun_antigo", `a ${manifesto.versao} pede o Bun ${manifesto.bunMinimo}, e este é o ${Bun.version}`);
 
   const pasta = lerPasta(destino);
-  if (pasta.tipo === "outra") return recusar("pasta_de_outra_coisa", destino);
+  if (pasta.tipo === "outra") return recusar("pasta_de_outra_coisa", "a pasta tem arquivos e não tem o package.json da Secretária");
   if (pasta.tipo === "secretaria") {
     if (pasta.versao !== null && versaoMaior(pasta.versao, manifesto.versao)) {
       return recusar("versao_mais_velha", `a pasta tem a ${pasta.versao}, e a publicada é a ${manifesto.versao}`);
@@ -205,7 +205,8 @@ export async function instalarPelaVersao(opcoes: OpcoesDaInstalacao): Promise<De
     try {
       trocar(destino, extraida, guardada, opcoes.renomear ?? renomearComEspera);
     } catch (erro) {
-      return recusar("troca_falhou", erro instanceof Error ? erro.message : String(erro));
+      // Só o código do erro: a mensagem do sistema traz o caminho, que mostra o nome do usuário.
+      return recusar("troca_falhou", (erro as { code?: string }).code ?? (erro instanceof Error ? erro.name : typeof erro));
     }
 
     for (const [caminho, conteudo] of Object.entries(opcoes.meuInicial)) {

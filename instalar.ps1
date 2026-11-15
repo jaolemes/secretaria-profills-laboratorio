@@ -555,7 +555,7 @@ async function instalarPelaVersao(opcoes) {
     return recusar2("bun_antigo", `a ${manifesto.versao} pede o Bun ${manifesto.bunMinimo}, e este \xE9 o ${Bun.version}`);
   const pasta = lerPasta(destino);
   if (pasta.tipo === "outra")
-    return recusar2("pasta_de_outra_coisa", destino);
+    return recusar2("pasta_de_outra_coisa", "a pasta tem arquivos e n\xE3o tem o package.json da Secret\xE1ria");
   if (pasta.tipo === "secretaria") {
     if (pasta.versao !== null && versaoMaior(pasta.versao, manifesto.versao)) {
       return recusar2("versao_mais_velha", `a pasta tem a ${pasta.versao}, e a publicada \xE9 a ${manifesto.versao}`);
@@ -588,7 +588,7 @@ async function instalarPelaVersao(opcoes) {
     try {
       trocar(destino, extraida, guardada, opcoes.renomear ?? renomearComEspera);
     } catch (erro) {
-      return recusar2("troca_falhou", erro instanceof Error ? erro.message : String(erro));
+      return recusar2("troca_falhou", erro.code ?? (erro instanceof Error ? erro.name : typeof erro));
     }
     for (const [caminho, conteudo] of Object.entries(opcoes.meuInicial)) {
       const alvo = path2.join(destino, FICA_NA_PASTA, ...caminho.split("/"));

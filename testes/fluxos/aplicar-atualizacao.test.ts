@@ -1,8 +1,8 @@
 /**
  * A atualização de ponta a ponta, contra a release falsa: o vendedor clica em Atualizar no servidor da
- * 0.1.0, que baixa e confere o pacote da 0.2.0, instala as dependências em `nova/`, sobe o atualizador
- * da própria 0.2.0 e para. O atualizador troca a pasta e sobe o servidor da 0.2.0, que é o servidor de
- * verdade deste repo dizendo a versão da instalação. A aba que clicou continua entrando; a outra, não.
+ * versão instalada, que baixa e confere o pacote da nova, instala as dependências em `nova/`, sobe o
+ * atualizador que veio na nova e para. O atualizador troca a pasta e sobe o servidor da nova, que é o
+ * servidor de verdade deste repo dizendo a versão da instalação. A aba que clicou continua entrando; a outra, não.
  */
 import { afterEach, expect, test } from "bun:test";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { conferirPacote, escreverManifesto, extrairPacote, lerManifesto, type EstadoDaAtualizacao } from "../../nucleo/atualizacao";
 import { caminhosDoAtualizador, lerAndamento } from "../../nucleo/atualizador";
 import { encerrarPid, vivo } from "../../nucleo/processos";
-import { lerArquivoDoServidor, type ArquivoDoServidor } from "../../nucleo/servidor";
+import { VERSAO_DO_NUCLEO, lerArquivoDoServidor, type ArquivoDoServidor } from "../../nucleo/servidor";
 import { rodar } from "../cli/rodar";
 import { WACLI_FALSO } from "../falsos/bancada";
 import { pacoteCom, subirReleaseFalsa, type ReleaseFalsa } from "../falsos/release";
@@ -20,6 +20,9 @@ import { cliDaInstalacao } from "../falsos/secretaria-de-verdade";
 import { NAVEGACAO_DE_TOPO, conectarWhatsappNoPalco, subirPalco, type Palco } from "../servidor/palco";
 
 const REPO = join(import.meta.dir, "..", "..");
+/** O servidor do palco é o deste repo: a instalação nasce na versão dele, hoje a 0.1.0. */
+const DE = VERSAO_DO_NUCLEO;
+const PARA = `${Number(DE.split(".")[0]) + 1}.0.0`;
 const PRAZO_DO_TESTE_MS = 120_000;
 const PRAZO_DA_TROCA_MS = 90_000;
 
@@ -65,17 +68,23 @@ async function outraAba(p: Palco): Promise<string> {
   return (entrada.headers.get("set-cookie") ?? "").split(";")[0] ?? "";
 }
 
-/** O servidor que o atualizador subiu, quando ele responde a versão nova. */
-async function esperarOServidorNovo(dirDados: string, versao: string): Promise<ArquivoDoServidor> {
+/**
+ * O servidor que o atualizador subiu, quando a troca chegou ao fim: o atualizador grava `concluido`
+ * só depois de o servidor novo responder, então esperar só a resposta deixaria o andamento em `subir`.
+ */
+async function esperarOFimDaTroca(dirRepo: string, dirDados: string, versao: string): Promise<ArquivoDoServidor> {
   const fim = Date.now() + PRAZO_DA_TROCA_MS;
   for (;;) {
+    const andamento = lerAndamento(caminhosDoAtualizador(dirRepo, dirDados).andamento);
+    const fase = andamento.tipo === "lido" ? andamento.andamento.fase : null;
+    if (fase === "desfeito") throw new Error(`a troca foi desfeita: ${JSON.stringify(andamento)}`);
     const arquivo = lerArquivoDoServidor(join(dirDados, "servidor.json"));
-    if (arquivo !== null) {
+    if (fase === "concluido" && arquivo !== null) {
       try {
         const info = (await (await fetch(`${arquivo.origem}/api/info`, { signal: AbortSignal.timeout(2_000) })).json()) as { dados: { versaoNucleo: string } };
         if (info.dados.versaoNucleo === versao) return arquivo;
       } catch {
-        // Ainda subindo.
+        // O servidor.json pode ser de um servidor que já parou.
       }
     }
     if (Date.now() >= fim) {
@@ -93,13 +102,13 @@ async function esperarOServidorNovo(dirDados: string, versao: string): Promise<A
 }
 
 test(
-  "a 0.1.0 vira a 0.2.0 pelo botão: a aba que clicou continua entrando e o WhatsApp segue conectado sem parear de novo",
+  "a versão instalada vira a nova pelo botão: a aba que clicou continua entrando e o WhatsApp segue conectado sem parear de novo",
   async () => {
     const r = (release = await subirReleaseFalsa());
     const cli = cliDaInstalacao({ origem: r.endereco.origin, chaves: r.chaves });
     const dirRepo = (raiz = mkdtempSync(join(tmpdir(), "secretaria-instalacao-")));
-    instalarDoPacote(pacoteCom("0.1.0", arquivosDaVersao("0.1.0", cli)), "0.1.0", dirRepo);
-    await r.publicar("0.2.0", { pacote: pacoteCom("0.2.0", arquivosDaVersao("0.2.0", cli)) });
+    instalarDoPacote(pacoteCom(DE, arquivosDaVersao(DE, cli)), DE, dirRepo);
+    await r.publicar(PARA, { pacote: pacoteCom(PARA, arquivosDaVersao(PARA, cli)) });
 
     const p = (palco = await subirPalco({ dirRepo }, { versoes: r.fonte(2_000) }));
     const { dirDados } = p.bancada;
@@ -109,27 +118,27 @@ test(
     expect(pareamentos()).toBe(1);
 
     const cookieDaOutra = await outraAba(p);
-    expect(((await (await p.painel("/api/atualizacao")).json()) as { dados: EstadoDaAtualizacao }).dados).toMatchObject({ fase: "versao_nova", nova: { versao: "0.2.0" }, bloqueio: null });
+    expect(((await (await p.painel("/api/atualizacao")).json()) as { dados: EstadoDaAtualizacao }).dados).toMatchObject({ fase: "versao_nova", nova: { versao: PARA }, bloqueio: null });
 
     const eventos = await p.eventosDoPainel();
     const clique = (await (await p.painel("/api/atualizacao/aplicar", { method: "POST" })).json()) as { dados: EstadoDaAtualizacao };
-    expect(clique.dados).toMatchObject({ fase: "atualizando", instalada: "0.1.0", para: "0.2.0", passo: "baixando" });
+    expect(clique.dados).toMatchObject({ fase: "atualizando", instalada: DE, para: PARA, passo: "baixando" });
     await p.servidor.parado;
     await eventos.fim;
     const texto = eventos.textos.join("");
     expect(['"passo":"instalando"', '"passo":"reiniciando"'].every((passo) => texto.includes(passo))).toBe(true);
 
-    const novo = await esperarOServidorNovo(dirDados, "0.2.0");
+    const novo = await esperarOFimDaTroca(dirRepo, dirDados, PARA);
     pidDoNovo = novo.pid;
     const doPainel = (cookie: string) => fetch(`${novo.origem}/api/atualizacao`, { headers: { Cookie: cookie, "Sec-Fetch-Site": "same-origin" } });
     const daAba = await doPainel(p.cookie);
     expect(daAba.status).toBe(200);
-    expect(((await daAba.json()) as { dados: EstadoDaAtualizacao }).dados).toEqual({ fase: "atualizado", instalada: "0.2.0", de: "0.1.0", nucleoMudado: 0, em: expect.any(String) });
+    expect(((await daAba.json()) as { dados: EstadoDaAtualizacao }).dados).toEqual({ fase: "atualizado", instalada: PARA, de: DE, nucleoMudado: 0, em: expect.any(String) });
     expect((await doPainel(cookieDaOutra)).status).toBe(401);
 
     const lido = lerAndamento(caminhosDoAtualizador(dirRepo, dirDados).andamento);
-    expect(lido.tipo === "lido" ? lido.andamento : null).toMatchObject({ de: "0.1.0", para: "0.2.0", fase: "concluido", falha: null });
-    expect(readFileSync(join(dirRepo, "nucleo", "marca.txt"), "utf8")).toBe("0.2.0\n");
+    expect(lido.tipo === "lido" ? lido.andamento : null).toMatchObject({ de: DE, para: PARA, fase: "concluido", falha: null });
+    expect(readFileSync(join(dirRepo, "nucleo", "marca.txt"), "utf8")).toBe(`${PARA}\n`);
 
     const conectado = await rodar(dirDados, ["esperar", "whatsapp=conectado", "--ate", "20s", "--json"]);
     expect(conectado.codigo).toBe(0);

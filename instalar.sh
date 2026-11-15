@@ -49,7 +49,10 @@ import { copyFileSync, existsSync as existsSync2, mkdirSync as mkdirSync2, readd
 import path2 from "path";
 
 // nucleo/atualizacao/chaves.ts
-var CHAVES_PUBLICAS = [];
+var CHAVES_PUBLICAS = [
+  { papel: "ativa", publica: "X+A+9QrCu3g7Y3Ty1hrelht9QWwplrtiP1BnkWOpE3Q=" },
+  { papel: "reserva", publica: "zM0h3uhXRuNG8HZN8e7IXHco1z6u5jwVtDZIr0r5JWE=" }
+];
 
 // nucleo/atualizacao/novidades.ts
 var MAXIMO_DE_LINHAS = 5;

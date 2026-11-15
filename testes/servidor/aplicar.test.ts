@@ -250,10 +250,11 @@ describe("antes de parar", () => {
 
   test("as dependências não instalam: falhou, e o servidor segue no ar na versão de antes", async () => {
     const quebrado = pacoteCom(MAIS_NOVA, { "package.json": '{"name":"secretaria-profills","version":', "nucleo/marca.txt": `${MAIS_NOVA}\n` });
-    const { p } = await subir({ publicar: { pacote: quebrado } });
+    const { p, repo: dirRepo } = await subir({ publicar: { pacote: quebrado } });
     await estado(p);
     expect(await aplicar(p)).toMatchObject({ status: 200, ok: true });
     expect(await esperarFase(p, "falhou")).toMatchObject({ motivo: "dependencias_falharam", explicacao: "Não deu para preparar a versão nova. Confira a internet e tente de novo." });
+    expect(existsSync(join(dirRepo, ".atualizacao", "nova"))).toBe(false);
     expect((await (await p.cru("/api/info")).json()) as unknown).toMatchObject({ dados: { versaoNucleo: VERSAO_DO_NUCLEO } });
   });
 
@@ -263,7 +264,7 @@ describe("antes de parar", () => {
     expect(await aplicar(p)).toMatchObject({ status: 200, ok: true });
     expect(await esperarFase(p, "falhou")).toMatchObject({ motivo: "atualizador_nao_comecou", nova: { versao: MAIS_NOVA } });
     expect(existsSync(join(dirRepo, ".atualizacao", "andamento.json"))).toBe(false);
-    expect(existsSync(join(dirRepo, ".atualizacao", "nova", "node_modules"))).toBe(true);
+    expect(existsSync(join(dirRepo, ".atualizacao", "nova"))).toBe(false);
     expect((await p.cru("/api/info")).status).toBe(200);
   });
 

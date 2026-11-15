@@ -1065,6 +1065,7 @@ Nenhum temporizador busca. A busca acontece em três momentos:
 | Pedido | Busca |
 |---|---|
 | `GET /api/atualizacao` do painel | quando a última conferência tem 6 horas ou mais, ficou sem resposta, ou nunca houve; senão devolve a guardada |
+| `GET /api/atualizacao?releitura=1` do painel | nunca: é o painel já aberto relendo o bloqueio quando um conector, uma rodada ou um cartão muda |
 | `POST /api/atualizacao/conferir` do painel | sempre: é o "Tentar agora" |
 | `POST /api/atualizacao/conferir` do agente (`bun secretaria atualizacao conferir`) | quando a última busca começou há 30 segundos ou mais; antes disso, `conferir_cedo_demais` (429) com `erro.esperaS` |
 

@@ -171,8 +171,9 @@ export function montarRotasDeAtualizacao(descoberta: Descoberta, aplicador: Apli
       metodo: "GET",
       caminho: "/api/atualizacao",
       quem: ["painel", "agente"],
-      async tratar({ chamador }) {
-        if (chamador === "painel") await descoberta.aoAbrirOPainel();
+      async tratar({ chamador, url }) {
+        // A releitura é o painel já aberto atrás de outro bloqueio: abrir o painel é só o carregamento da página.
+        if (chamador === "painel" && url.searchParams.get("releitura") !== "1") await descoberta.aoAbrirOPainel();
         return respostaJson(ok(estadoPara(aplicador.estado(), chamador)), chamador);
       },
     },

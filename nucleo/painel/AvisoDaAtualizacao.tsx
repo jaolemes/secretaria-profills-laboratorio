@@ -3,13 +3,19 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { EstadoDaAtualizacao } from "../atualizacao";
 import { Button } from "@/components/ui/button";
 import { cn } from "cn";
-import { lerNaVolta, vistaDaAtualizacao, type AvisoDaAtualizacao, type BotaoDaAtualizacao, type IconeDaAtualizacao, type VistaDaAtualizacao } from "./atualizacao";
+import {
+  SEM_VOLTA,
+  acompanharAVolta,
+  lerNaVolta,
+  sondarAVolta,
+  vistaDaAtualizacao,
+  type AvisoDaAtualizacao,
+  type BotaoDaAtualizacao,
+  type IconeDaAtualizacao,
+  type VistaDaAtualizacao,
+} from "./atualizacao";
 import { chaveDosConectores, ehEstadoDaAtualizacao, type Conexao } from "./conexao";
 import { api } from "./telas/comum";
-
-/** O desenho: com o servidor fora do ar no meio da atualização, o painel pergunta a cada 2 s, por até 3 min. */
-const ESPERA_DA_SONDA_MS = 2_000;
-const PRAZO_DA_VOLTA_MS = 3 * 60_000;
 
 export interface ControleDaAtualizacao {
   readonly vista: VistaDaAtualizacao | null;
@@ -20,8 +26,6 @@ export interface ControleDaAtualizacao {
   agir(acao: BotaoDaAtualizacao["acao"]): void;
 }
 
-const esperar = (ms: number) => new Promise<void>((resolver) => setTimeout(resolver, ms));
-
 /**
  * O estado da atualização para o painel inteiro. A página abre lendo com busca; depois relê sem busca
  * quando um conector, uma rodada ou um cartão muda, porque o bloqueio depende deles. Cada passo chega
@@ -30,8 +34,7 @@ const esperar = (ms: number) => new Promise<void>((resolver) => setTimeout(resol
 export function useAtualizacao(conexao: Conexao): ControleDaAtualizacao {
   const [estado, setEstado] = useState<EstadoDaAtualizacao | null>(null);
   const [pedido, setPedido] = useState<BotaoDaAtualizacao["acao"] | null>(null);
-  const [perdeu, setPerdeu] = useState(false);
-  const [desistiu, setDesistiu] = useState(false);
+  const [volta, setVolta] = useState(SEM_VOLTA);
   const versaoDaPagina = useRef<string | null>(null);
   const atual = useRef(estado);
   atual.current = estado;
@@ -65,27 +68,30 @@ export function useAtualizacao(conexao: Conexao): ControleDaAtualizacao {
   }, [conexao.atualizacao, receber]);
 
   const atualizando = estado?.fase === "atualizando";
-  if (atualizando && conexao.canal === "sem_conexao" && !perdeu) setPerdeu(true);
-  const sondando = atualizando && perdeu && !desistiu;
+  const proxima = acompanharAVolta(volta, estado?.fase ?? null, conexao.canal);
+  if (proxima !== volta) setVolta(proxima);
+  const sondando = atualizando && proxima.perdeu && !proxima.desistiu;
 
   useEffect(() => {
     if (!sondando) return;
     let valendo = true;
-    void (async () => {
-      const fim = Date.now() + PRAZO_DA_VOLTA_MS;
-      while (valendo && Date.now() < fim) {
-        await esperar(ESPERA_DA_SONDA_MS);
-        if (!valendo) return;
+    void sondarAVolta(versaoDaPagina.current, {
+      agora: () => Date.now(),
+      esperar: (ms) => new Promise<void>((resolver) => setTimeout(resolver, ms)),
+      versaoNoAr: async () => {
         const info = await api.info();
-        if (!valendo || !info.ok) continue;
+        return info.ok ? info.dados.versaoNucleo : null;
+      },
+      lerAtualizacao: async () => {
         const lido = await api.atualizacao(true);
-        if (!valendo) return;
-        if (lido.ok && ehEstadoDaAtualizacao(lido.dados)) receber(lido.dados);
-        // Sem sessão no servidor novo (outra aba que não clicou): só a página nova sabe o que fazer.
-        else if (info.dados.versaoNucleo !== versaoDaPagina.current) window.location.reload();
-      }
-      if (valendo) setDesistiu(true);
-    })();
+        return lido.ok && ehEstadoDaAtualizacao(lido.dados) ? lido.dados : null;
+      },
+      valendo: () => valendo,
+      receber,
+      recarregar: () => window.location.reload(),
+    }).then((fim) => {
+      if (fim === "desistiu") setVolta((atual) => ({ ...atual, desistiu: true }));
+    });
     return () => {
       valendo = false;
     };
@@ -110,7 +116,7 @@ export function useAtualizacao(conexao: Conexao): ControleDaAtualizacao {
   return {
     vista: vistaDaAtualizacao(estado, pedido === "conferir"),
     ocupado: pedido !== null || conexao.canal !== "aberto",
-    esperandoAVolta: atualizando && (perdeu || conexao.canal === "sem_conexao") && !desistiu,
+    esperandoAVolta: atualizando && proxima.perdeu && !proxima.desistiu,
     agir,
   };
 }

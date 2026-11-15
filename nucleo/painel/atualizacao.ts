@@ -1,4 +1,5 @@
 import type { Bloqueio, EstadoDaAtualizacao, MotivoDoBloqueio, PassoDaAplicacao } from "../atualizacao";
+import type { Conexao } from "./conexao";
 
 export type IconeDaAtualizacao = "versao_nova" | "girando" | "feito" | "alerta" | "sem_rede";
 
@@ -143,4 +144,53 @@ export function vistaDaAtualizacao(estado: EstadoDaAtualizacao | null, conferind
 export function lerNaVolta(versaoDaPagina: string, atual: EstadoDaAtualizacao | null, lido: EstadoDaAtualizacao): "mostrar" | "esperar" | "recarregar" {
   if (lido.instalada === versaoDaPagina) return "mostrar";
   return atual?.fase === "atualizando" && lido.fase !== "atualizado" ? "esperar" : "recarregar";
+}
+
+/** Se o canal caiu no meio da atualização e se a página já desistiu de esperar o servidor voltar. */
+export interface Volta {
+  readonly perdeu: boolean;
+  readonly desistiu: boolean;
+}
+
+export const SEM_VOLTA: Volta = { perdeu: false, desistiu: false };
+
+/** Fora de `atualizando`, a espera recomeça: o Tentar de novo depois de um `falhou` sonda só se o canal cair de novo. */
+export function acompanharAVolta(volta: Volta, fase: Fase | null, canal: Conexao["canal"]): Volta {
+  if (fase !== "atualizando") return volta.perdeu || volta.desistiu ? SEM_VOLTA : volta;
+  if (canal === "sem_conexao" && !volta.perdeu) return { ...volta, perdeu: true };
+  return volta;
+}
+
+/** O desenho: com o servidor fora do ar no meio da atualização, o painel pergunta a cada 2 s, por até 3 min. */
+export const ESPERA_DA_SONDA_MS = 2_000;
+export const PRAZO_DA_VOLTA_MS = 3 * 60_000;
+
+export interface PortasDaSonda {
+  agora(): number;
+  esperar(ms: number): Promise<void>;
+  /** A versão que `GET /api/info` diz, ou `null` sem resposta. */
+  versaoNoAr(): Promise<string | null>;
+  /** O estado com a sessão desta aba, ou `null` sem ela. */
+  lerAtualizacao(): Promise<EstadoDaAtualizacao | null>;
+  valendo(): boolean;
+  receber(lido: EstadoDaAtualizacao): void;
+  recarregar(): void;
+}
+
+/** Pergunta pelo servidor até ele voltar, a página desistir ou quem chamou parar. */
+export async function sondarAVolta(versaoDaPagina: string | null, portas: PortasDaSonda): Promise<"parou" | "desistiu"> {
+  const fim = portas.agora() + PRAZO_DA_VOLTA_MS;
+  while (portas.valendo() && portas.agora() < fim) {
+    await portas.esperar(ESPERA_DA_SONDA_MS);
+    if (!portas.valendo()) return "parou";
+    const versao = await portas.versaoNoAr();
+    if (!portas.valendo()) return "parou";
+    if (versao === null) continue;
+    const lido = await portas.lerAtualizacao();
+    if (!portas.valendo()) return "parou";
+    if (lido !== null) portas.receber(lido);
+    // Sem sessão no servidor novo (outra aba que não clicou): só a página nova sabe o que fazer.
+    else if (versao !== versaoDaPagina) portas.recarregar();
+  }
+  return portas.valendo() ? "desistiu" : "parou";
 }

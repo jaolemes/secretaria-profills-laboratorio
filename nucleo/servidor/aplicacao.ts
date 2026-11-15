@@ -171,10 +171,7 @@ export function criarAplicador(deps: DependenciasDoAplicador): Aplicador {
     if (!conferido.ok) throw new FalhaDaAplicacao("pacote_recusado", conferido.detalhe);
     rmSync(caminhos.nova, { recursive: true, force: true });
     const extraido = extrairPacote(conferido.pacote, caminhos.nova);
-    if (!extraido.ok) {
-      rmSync(caminhos.nova, { recursive: true, force: true });
-      throw new FalhaDaAplicacao("pacote_recusado", extraido.detalhe);
-    }
+    if (!extraido.ok) throw new FalhaDaAplicacao("pacote_recusado", extraido.detalhe);
   }
 
   /** Passo 3: toda a rede das dependências acontece com o servidor ainda no ar. */
@@ -223,12 +220,21 @@ export function criarAplicador(deps: DependenciasDoAplicador): Aplicador {
         throw new FalhaDaAplicacao("atualizador_nao_comecou", filho.erro() ?? `saiu com ${filho.saida() ?? "nada"}`);
       }
     }
-    deps.registro.info("atualizacao.reiniciando", { de: deps.instalada, para });
-    deps.pedirParada();
+  }
+
+  /** O servidor segue no ar na versão de antes: a `nova/` que sobrou só ocuparia o disco. */
+  function apagarNova(): void {
+    try {
+      rmSync(caminhos.nova, { recursive: true, force: true });
+    } catch (erro) {
+      // No Windows, um arquivo ainda aberto segura a pasta; a próxima tentativa a apaga antes de extrair.
+      deps.registro.aviso("atualizacao.nova_ficou", { erro: erro instanceof Error ? erro.name : typeof erro });
+    }
   }
 
   async function rodar(para: string, cookies: string | null): Promise<void> {
     const passo = (proximo: PassoDaAplicacao) => mudar({ tipo: "em_curso", para, passo: proximo });
+    let entregue = false;
     try {
       await deps.sessoes.guardarParaORestart(cookies);
       await baixarEExtrair(para);
@@ -236,7 +242,12 @@ export function criarAplicador(deps: DependenciasDoAplicador): Aplicador {
       await instalarDependencias();
       passo("reiniciando");
       await entregarAoAtualizador(para);
+      entregue = true;
+      deps.registro.info("atualizacao.reiniciando", { de: deps.instalada, para });
+      deps.pedirParada();
     } catch (erro) {
+      // Com o atualizador no comando, a `nova/` é dele.
+      if (!entregue) apagarNova();
       const motivo = erro instanceof FalhaDaAplicacao ? erro.motivo : "falha_interna";
       // O detalhe da falha nossa vai ao registro; do erro inesperado, só o nome, como no resto do servidor.
       deps.registro.aviso("atualizacao.falhou", { motivo, detalhe: erro instanceof FalhaDaAplicacao ? erro.message.slice(0, 500) : erro instanceof Error ? erro.name : typeof erro });

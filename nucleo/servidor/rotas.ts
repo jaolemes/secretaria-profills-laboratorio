@@ -392,9 +392,9 @@ interface EmailAchado {
   readonly cabecalho: CabecalhoComCaminho;
 }
 
-/** Ações de uma conta de e-mail. `remover` e `mudar` não são da máquina: apagam a conta ou trocam rótulo e janela. */
 /** As ações que levam a uma fase que só existe em memória (pareando, autorizando, testando) e se perderia no restart. */
 const COMECA_FASE_EM_MEMORIA: readonly string[] = ["conectar", "testar"];
+/** Ações de uma conta de e-mail. `remover` e `mudar` não são da máquina: apagam a conta ou trocam rótulo e janela. */
 const ACOES_DA_CONTA = ["conectar", "cancelar", "testar", "desconectar", "remover", "mudar"] as const;
 type AcaoDaConta = (typeof ACOES_DA_CONTA)[number];
 

@@ -37,7 +37,8 @@ if ! bun_serve bun; then
   export PATH
 fi
 
-pasta_temporaria="$(mktemp -d)"
+# Com o modelo, o mktemp do macOS usa o TMPDIR; sem ele, usaria a pasta temporária do usuário e ignoraria o TMPDIR.
+pasta_temporaria="$(mktemp -d "${TMPDIR:-/tmp}/secretaria.XXXXXXXXXX")"
 trap 'rm -rf "$pasta_temporaria"' EXIT
 instalador="$pasta_temporaria/instalar.js"
 

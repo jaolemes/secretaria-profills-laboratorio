@@ -495,3 +495,15 @@ export const decisao = sqliteTable(
   },
   (t) => [check("decisao_acao", sql`${t.acao} IN (${lista(ACOES_DA_DECISAO)})`), check("decisao_hash", sql`length(${t.hash}) = 64`)],
 );
+
+/** Uma linha só: a última busca do `versao.json`, para o restart não buscar de novo antes das 6 horas. */
+export const conferenciaDeVersao = sqliteTable(
+  "conferencia_de_versao",
+  {
+    id: integer("id").primaryKey(),
+    em: text("em").notNull(),
+    /** JSON do resultado da busca, sem segredo: a versão publicada e o O que muda, ou só o tipo. */
+    resultado: text("resultado").notNull(),
+  },
+  (t) => [check("conferencia_de_versao_unica", sql`${t.id} = 1`), check("conferencia_de_versao_resultado_json", sql`json_valid(${t.resultado})`)],
+);

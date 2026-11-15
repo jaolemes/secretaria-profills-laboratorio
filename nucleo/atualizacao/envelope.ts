@@ -9,7 +9,7 @@ interface Envelope {
   readonly assinatura: string;
 }
 
-const TETO_DO_ENVELOPE_BYTES = 64 * 1024;
+export const TETO_DO_ENVELOPE_BYTES = 64 * 1024;
 const ALGORITMO = "Ed25519";
 
 function deBase64(texto: string): Uint8Array<ArrayBuffer> | null {

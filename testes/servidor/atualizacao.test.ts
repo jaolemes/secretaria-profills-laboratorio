@@ -62,8 +62,15 @@ describe("descoberta de versão nova", () => {
     await r.publicar(MAIS_NOVA, { outraChave: true });
     expect(await abrirOPainel(p)).toMatchObject({ fase: "em_dia" });
     const registro = readFileSync(join(p.bancada.dirDados, "logs", "servidor.log"), "utf8");
-    const aviso = registro.split("\n").find((linha) => linha.includes("atualizacao.versao_recusada"));
+    const aviso = registro.split("\n").find((linha) => linha.includes("atualizacao.busca_com_aviso"));
     expect(aviso === undefined ? null : JSON.parse(aviso)).toMatchObject({ nivel: "aviso", campos: { motivo: "chave_desconhecida" } });
+  });
+
+  test("resposta maior que 64 KiB vira em_dia, com envelope_invalido no registro", async () => {
+    const { p, r } = await subir();
+    r.servir("x".repeat(5 * 1024 * 1024));
+    expect(await abrirOPainel(p)).toMatchObject({ fase: "em_dia" });
+    expect(readFileSync(join(p.bancada.dirDados, "logs", "servidor.log"), "utf8")).toContain('"motivo":"envelope_invalido"');
   });
 
   test("prazo vencido vira sem_internet, e o resto da Secretária segue no ar", async () => {
@@ -156,7 +163,7 @@ describe("o agente e a conferência", () => {
 
   test("dois pedidos ao mesmo tempo fazem uma busca só", async () => {
     const { p, r } = await subir();
-    await r.publicar(MAIS_NOVA);
+    await r.publicar(MAIS_NOVA, { demoraMs: 150 });
     const [a, b] = await Promise.all([abrirOPainel(p), dados<EstadoDaAtualizacao>(p.painel("/api/atualizacao/conferir", { method: "POST" }))]);
     expect([a.fase, b.fase]).toEqual(["versao_nova", "versao_nova"]);
     expect(r.pedidos()).toBe(1);

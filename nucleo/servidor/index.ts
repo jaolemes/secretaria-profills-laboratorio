@@ -12,6 +12,7 @@ import { CONECTORES_UNICOS, diaEm, falha, montarEstadoPainel, saida, type Estado
 import { criarSupervisor, type Supervisor } from "../processos";
 import { criarRegistro, type Registro } from "../registro";
 import { anunciarPid, apagarArquivoDoServidor, apagarPid, assumirPid, gravarArquivoDoServidor } from "./arquivo";
+import { FONTE_DAS_VERSOES, atualizacaoNoDiagnostico, criarDescoberta, type FonteDasVersoes } from "./atualizacao";
 import { encerrarGravacoesInterrompidas } from "./escritas";
 import { criarPublicador, type Publicador } from "./eventos";
 import { construirPainel } from "./painel";
@@ -22,6 +23,7 @@ import { lerTravas } from "./travas";
 export { BancoEmUso } from "../banco";
 export { CofreIndisponivel } from "../cofre";
 export { lerArquivoDoServidor, lerPidDoServidor, type ArquivoDoServidor } from "./arquivo";
+export type { AtualizacaoNoDiagnostico, FonteDasVersoes } from "./atualizacao";
 export { LIMITE_DO_CORPO } from "./guarda";
 export { INTERVALO_MINIMO_MS, criarPublicador, type Relogio } from "./eventos";
 export type { ContaNoDiagnostico, Diagnostico, EstadoDoBackup, Info, ItemIgnorado, RespostaDaTarefa } from "./rotas";
@@ -55,6 +57,8 @@ export interface OpcoesDoServidor {
   readonly prazoDoCofreMs?: number;
   /** Só o teste desliga. Ver `OpcoesDosConectores.sincronizacaoAutomatica`. */
   readonly sincronizacaoAutomatica?: boolean;
+  /** Só o teste troca: a release falsa e a chave dela. Não é campo do `ambiente.json`. */
+  readonly versoes?: FonteDasVersoes;
 }
 
 /** O servidor escreve uma linha JSON por evento em `<dados>/logs/servidor.log`. */
@@ -165,6 +169,14 @@ export async function iniciarServidor(ambiente: Ambiente, opcoes: OpcoesDoServid
 
     const guarda = { origem, token, sessoes };
     const info: Info = { app: "secretaria-profills", versaoNucleo: VERSAO_DO_NUCLEO, idInstalacao: dados.id };
+    const descoberta = criarDescoberta({
+      banco,
+      registro,
+      fonte: opcoes.versoes ?? FONTE_DAS_VERSOES,
+      instalada: VERSAO_DO_NUCLEO,
+      dirRepo: ambiente.dirRepo,
+      agora: ambiente.agora,
+    });
     const diagnostico = (): Diagnostico => {
       const estados = ligados.estado();
       const painelAtual = retrato();
@@ -193,6 +205,7 @@ export async function iniciarServidor(ambiente: Ambiente, opcoes: OpcoesDoServid
           })),
         },
         backup,
+        atualizacao: atualizacaoNoDiagnostico(descoberta.estado()),
         travas: lerTravas(ambiente.dirRepo),
         sistema: lerSistema(),
       };
@@ -235,6 +248,7 @@ export async function iniciarServidor(ambiente: Ambiente, opcoes: OpcoesDoServid
       garantirBackup,
       retrato,
       diagnostico,
+      descoberta,
       pedirParada: () => {
         setTimeout(() => void parar(), 0);
       },

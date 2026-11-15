@@ -6,7 +6,7 @@ import { assinarManifesto, escreverManifesto, gerarParDeChaves, type ChavePublic
 
 const CAMINHO = "/releases/latest/download/versao.json";
 
-type Resposta = { readonly tipo: "corpo"; readonly corpo: string } | { readonly tipo: "status"; readonly status: number } | { readonly tipo: "pendurar" };
+type Resposta = { readonly tipo: "corpo"; readonly corpo: string; readonly demoraMs: number } | { readonly tipo: "status"; readonly status: number } | { readonly tipo: "pendurar" };
 
 export interface ReleaseFalsa {
   readonly endereco: URL;
@@ -14,8 +14,13 @@ export interface ReleaseFalsa {
   readonly chaves: readonly ChavePublica[];
   /** Quantas vezes o `versao.json` foi pedido. */
   pedidos(): number;
-  /** Publica a versão, assinada pela chave ativa ou, com `outraChave`, por uma que a Secretária não conhece. */
-  publicar(versao: string, opcoes?: { readonly bunMinimo?: string; readonly outraChave?: true }): Promise<void>;
+  /**
+   * Publica a versão, assinada pela chave ativa ou, com `outraChave`, por uma que a Secretária não conhece.
+   * `demoraMs` segura cada resposta, para dois pedidos se encontrarem no meio da busca.
+   */
+  publicar(versao: string, opcoes?: { readonly bunMinimo?: string; readonly outraChave?: true; readonly demoraMs?: number }): Promise<void>;
+  /** Responde 200 com este corpo, como veio, sem assinar. */
+  servir(corpo: string): void;
   /** Responde só com este status, sem corpo. */
   responder(status: number): void;
   /** Recebe o pedido e nunca responde. */
@@ -31,12 +36,14 @@ export async function subirReleaseFalsa(): Promise<ReleaseFalsa> {
   const servidor = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    fetch(req) {
+    async fetch(req) {
       if (new URL(req.url).pathname !== CAMINHO) return new Response("não existe", { status: 404 });
       pedidos += 1;
-      if (resposta.tipo === "pendurar") return new Promise<Response>(() => {});
-      if (resposta.tipo === "status") return new Response(null, { status: resposta.status });
-      return new Response(resposta.corpo, { headers: { "Content-Type": "application/octet-stream" } });
+      const atual = resposta;
+      if (atual.tipo === "pendurar") return new Promise<Response>(() => {});
+      if (atual.tipo === "status") return new Response(null, { status: atual.status });
+      if (atual.demoraMs > 0) await Bun.sleep(atual.demoraMs);
+      return new Response(atual.corpo, { headers: { "Content-Type": "application/octet-stream" } });
     },
   });
 
@@ -58,7 +65,11 @@ export async function subirReleaseFalsa(): Promise<ReleaseFalsa> {
     chaves: [{ papel: "ativa", publica: ativa.publica }],
     pedidos: () => pedidos,
     async publicar(versao, opcoes = {}) {
-      resposta = { tipo: "corpo", corpo: await assinar(versao, opcoes.outraChave ? outra : ativa, opcoes.bunMinimo ?? "1.4.4") };
+      const corpo = await assinar(versao, opcoes.outraChave ? outra : ativa, opcoes.bunMinimo ?? "1.4.4");
+      resposta = { tipo: "corpo", corpo, demoraMs: opcoes.demoraMs ?? 0 };
+    },
+    servir(corpo) {
+      resposta = { tipo: "corpo", corpo, demoraMs: 0 };
     },
     responder(status) {
       resposta = { tipo: "status", status };

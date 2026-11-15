@@ -210,6 +210,13 @@ export const ERROS = {
     acao: "Espere um pouco e teste de novo.",
     acaoDoAgente: "Não repita o teste em laço: o provedor pode bloquear a conta. Espere 30 segundos e olhe `bun secretaria status` antes de testar de novo.",
   },
+  conferir_cedo_demais: {
+    http: 429,
+    saida: 1,
+    mensagem: "A Secretária conferiu a versão há menos de 30 segundos.",
+    acao: "Espere um pouco e confira de novo.",
+    acaoDoAgente: "Não confira em laço. Leia o estado com `bun secretaria atualizacao`; se precisar conferir de novo, espere os segundos de `erro.esperaS`.",
+  },
   corpo_grande: {
     http: 413,
     saida: 1,

@@ -57,7 +57,7 @@ function pacoteFeitoAMao(
   };
   const entradas = opcoes.semLista ? arquivos : [{ caminho: LISTA_DO_PACOTE, dados: texto(JSON.stringify(lista)), executavel: false }, ...arquivos];
   const tar = (opcoes.mexerNoTar ?? ((bytes) => bytes))(escreverTar(entradas));
-  const pacote = Bun.gzipSync(tar);
+  const pacote = Bun.gzipSync(new Uint8Array(tar));
   const conferencia = conferirPacote(pacote, manifestoDe(pacote));
   if (!conferencia.ok) throw new Error(conferencia.detalhe);
   return conferencia.pacote;
@@ -260,7 +260,27 @@ describe("pacote da versão", () => {
     expect(readdirSync(pasta)).toEqual([]);
   });
 
-  const umArquivo: ArquivoDoTar = { caminho: "nucleo/a.ts", dados, executavel: false };
+  test("a extração recusa pacote com duas listas", () => {
+    const pasta = pastaTemporaria();
+    const pacote = pacoteFeitoAMao([
+      { caminho: "nucleo/a.ts", dados, executavel: false },
+      { caminho: LISTA_DO_PACOTE, dados: texto("{}"), executavel: false },
+    ]);
+    expect(extrairPacote(pacote, join(pasta, "nova"))).toMatchObject({ ok: false, motivo: "caminho_recusado" });
+    expect(readdirSync(pasta)).toEqual([]);
+  });
+
+  test("a extração recusa arquivo com nome de pasta", () => {
+    const pasta = pastaTemporaria();
+    const pacote = pacoteFeitoAMao([
+      { caminho: "nucleo/a", dados, executavel: false },
+      { caminho: "nucleo/A/b.ts", dados, executavel: false },
+    ]);
+    expect(extrairPacote(pacote, join(pasta, "nova"))).toMatchObject({ ok: false, motivo: "caminho_recusado" });
+    expect(readdirSync(pasta)).toEqual([]);
+  });
+
+  const umArquivo: ArquivoDoTar ={ caminho: "nucleo/a.ts", dados, executavel: false };
   const itemDaLista = { caminho: "nucleo/a.ts", sha256: sha256(dados), bytes: dados.length };
 
   test.each([
@@ -269,6 +289,7 @@ describe("pacote da versão", () => {
     ["com lista de outra versão", { lista: { v: 1, versao: "0.3.0", arquivos: [itemDaLista] } }],
     ["com arquivo que a lista não tem", { lista: { v: 1, versao: "0.2.0", arquivos: [] } }],
     ["com sha256 diferente do da lista", { lista: { v: 1, versao: "0.2.0", arquivos: [{ ...itemDaLista, sha256: "0".repeat(64) }] } }],
+    ["com lista que repete um arquivo", { lista: { v: 1, versao: "0.2.0", arquivos: [itemDaLista, itemDaLista] } }],
     [
       "sem um arquivo que a lista tem",
       { lista: { v: 1, versao: "0.2.0", arquivos: [itemDaLista, { ...itemDaLista, caminho: "nucleo/b.ts" }] } },

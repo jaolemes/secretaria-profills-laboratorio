@@ -14,7 +14,8 @@ describe("novidades de cada versão", () => {
   });
 
   test("todo arquivo de novidades segue a regra e diz a versão do próprio nome", () => {
-    const nomes = existsSync(PASTA) ? readdirSync(PASTA) : [];
+    const nomes = readdirSync(PASTA);
+    expect(nomes).toContain(`${VERSAO}.md`);
     const problemas = nomes.flatMap((nome) => {
       const versao = nome.replace(/\.md$/, "");
       if (!nome.endsWith(".md") || !PADRAO_DE_VERSAO.test(versao)) return [`${nome}: o nome precisa ser <X.Y.Z>.md`];

@@ -62,7 +62,12 @@ describe("juntarEstado: a descoberta, a atualização e o que está ocupado", ()
       nova: NOVA,
       bloqueio: null,
     });
-    expect(juntarEstado(EM_DIA, { tipo: "falhou", para: "0.3.0", motivo: "interrompida", em: EM }, [])).toMatchObject({ fase: "falhou", nova: null, bloqueio: null });
+  });
+
+  test("falhou some quando uma conferência nova deixa de trazer a versão nova: não há o que tentar de novo", () => {
+    expect(juntarEstado(EM_DIA, { tipo: "falhou", para: "0.3.0", motivo: "interrompida", em: EM }, [])).toEqual(EM_DIA);
+    const semInternet: EstadoDaDescoberta = { fase: "sem_internet", instalada: "0.1.0", tentadaEm: EM };
+    expect(juntarEstado(semInternet, { tipo: "falhou", para: "0.2.0", motivo: "sem_internet", em: EM }, [])).toEqual(semInternet);
   });
 
   test("concluída: atualizado, com a contagem do núcleo mudado; uma versão mais nova ainda vira versao_nova", () => {

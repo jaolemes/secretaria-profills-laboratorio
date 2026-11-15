@@ -165,7 +165,9 @@ describe("instalar pela versão marcada", () => {
     const destino = join(base, "documentos");
     escrever(destino, { "planilha.txt": "do vendedor\n" });
 
-    expect(await instalarPelaVersao(opcoes(destino))).toMatchObject({ tipo: "recusada", motivo: "pasta_de_outra_coisa" });
+    const desfecho = await instalarPelaVersao(opcoes(destino));
+    expect(desfecho).toMatchObject({ tipo: "recusada", motivo: "pasta_de_outra_coisa" });
+    expect(JSON.stringify(desfecho)).not.toContain(base);
     expect(retratoDaPasta(base)).toEqual({ "documentos/planilha.txt": expect.any(String) });
   });
 
@@ -186,7 +188,7 @@ describe("instalar pela versão marcada", () => {
       renameSync(de, para);
     };
 
-    expect(await instalarPelaVersao(opcoes(destino, { renomear }))).toMatchObject({ tipo: "recusada", motivo: "troca_falhou" });
+    expect(await instalarPelaVersao(opcoes(destino, { renomear }))).toMatchObject({ tipo: "recusada", motivo: "troca_falhou", detalhe: "EBUSY" });
     expect(retratoDaPasta(base)).toEqual(antes);
     expect(readdirSync(base)).toEqual(["secretaria-profills"]);
   });

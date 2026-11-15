@@ -117,5 +117,5 @@ if (import.meta.main) {
   const raiz = path.join(import.meta.dir, "..", "..");
   const scripts = await scriptsComOInstalador(raiz);
   for (const tipo of ["sh", "ps1"] as const) writeFileSync(path.join(raiz, ARQUIVO_DO_SCRIPT[tipo]), scripts[tipo]);
-  console.log(`regravou ${ARQUIVO_DO_SCRIPT.sh} e ${ARQUIVO_DO_SCRIPT.ps1}`);
+  process.stdout.write(`regravou ${ARQUIVO_DO_SCRIPT.sh} e ${ARQUIVO_DO_SCRIPT.ps1}\n`);
 }

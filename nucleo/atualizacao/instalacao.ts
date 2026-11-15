@@ -255,7 +255,7 @@ function efeitosReais(): EfeitosDoScript {
     cwd: process.cwd(),
     agora: new Date(),
     rodar: (argv, cwd, quieto = false) => Bun.spawn([...argv], { cwd, stdio: quieto ? ["ignore", "ignore", "ignore"] : ["inherit", "inherit", "inherit"] }).exited,
-    escrever: (texto) => console.log(texto),
+    escrever: (texto) => process.stdout.write(`${texto}\n`),
   };
 }
 

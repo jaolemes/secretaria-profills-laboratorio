@@ -79,8 +79,14 @@ describe("o aviso no cartão do pé", () => {
   test("em dia: o cartão não ganha linha, e a versão fica na lista das conexões", () => {
     const html = lateral("em_dia");
     expect(html).toContain("Secretária 0.1.0 · em dia");
-    expect(html).not.toContain('aria-live="polite"');
+    expect(html).not.toContain("Tem versão nova");
     expect(html).not.toContain('data-ponto="novidade"');
+  });
+
+  test.each(["em_dia", "versao_nova"])("%s: a região que anuncia o aviso já está no cartão antes de ele chegar", (nome) => {
+    // Leitor de tela costuma não anunciar uma região que entra no DOM já com o texto.
+    expect(lateral(nome)).toMatch(/<div aria-live="polite" data-regiao="atualizacao">/);
+    expect(aviso("versao_nova")).not.toContain("aria-live");
   });
 
   test("versão nova: Tem versão nova antes do Atualizar, em destaque e à direita; a versão nova na lista", () => {

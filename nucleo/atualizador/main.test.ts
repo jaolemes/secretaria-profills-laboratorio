@@ -673,6 +673,65 @@ describe("o processo que o atualizador subiu", () => {
   });
 });
 
+describe("o pid anotado sem a hora de início", () => {
+  const HA_MUITO = "2026-01-01T00:00:00.000Z";
+
+  /** Os processos do sistema de verdade, com o encerramento só anotado: o teste nunca mata ninguém. */
+  function comProcessosReais() {
+    const encerrados: number[] = [];
+    const efeitos = efeitosDeTeste({ ...efeitosReais(), encerrarArvore: async (pid) => (encerrados.push(pid), true) });
+    return { efeitos, encerrados };
+  }
+
+  const gravar = (andamento: Andamento) => writeFileSync(caminhosDoAtualizador(instalacao.raiz, instalacao.dirDados).andamento, JSON.stringify(andamento));
+  const noInstalar = (pid: number, iniciadoEm: string, atualizadoEm: string): Andamento => ({
+    ...andamentoPreparado("0.1.0", "0.2.0"),
+    iniciadoEm,
+    atualizadoEm,
+    fase: "instalar",
+    restaurarDados: true,
+    processo: { papel: "instalar", pid, inicio: null },
+  });
+  const voltar = (efeitos: Efeitos) => recuperar({ raizDoRepo: instalacao.raiz, dirDados: instalacao.dirDados, versaoNoAr: null, prazos: PRAZOS_CURTOS }, efeitos);
+
+  test("o pid que hoje é de um processo nascido depois da atualização não é encerrado, e a volta segue", async () => {
+    instalacao = montarInstalacao();
+    const { efeitos, encerrados } = comProcessosReais();
+    gravar(noInstalar(process.pid, HA_MUITO, HA_MUITO));
+
+    expect(await voltar(efeitos)).toEqual({ tipo: "desfeita", de: "0.1.0", para: "0.2.0" });
+    expect(encerrados).toEqual([]);
+  });
+
+  test("o mesmo pid, com a pasta rasgada, não segura a recomposição", async () => {
+    instalacao = montarInstalacao();
+    const pasta = retratoDaPasta(instalacao.raiz);
+    const { anterior } = caminhosDoAtualizador(instalacao.raiz, instalacao.dirDados);
+    mkdirSync(anterior, { recursive: true });
+    renameSync(path.join(instalacao.raiz, "nucleo"), path.join(anterior, "nucleo"));
+    gravar({ ...noInstalar(process.pid, HA_MUITO, HA_MUITO), fase: "trocar", restaurarDados: false, trocas: [{ caminho: "nucleo", tinhaAntiga: true, temNova: true }] });
+
+    expect(await recomporArvore(instalacao.raiz, comProcessosReais().efeitos)).toEqual({ tipo: "recomposta" });
+    expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
+  });
+
+  test("o instalar que nasceu durante a atualização é encerrado antes da volta", async () => {
+    instalacao = montarInstalacao();
+    const { efeitos, encerrados } = comProcessosReais();
+    const antes = new Date().toISOString();
+    const instalar = Bun.spawn([process.execPath, "-e", "setInterval(() => {}, 60_000)"], { stdio: ["ignore", "ignore", "ignore"] });
+    try {
+      gravar(noInstalar(instalar.pid, antes, new Date().toISOString()));
+
+      expect(await voltar(efeitos)).toEqual({ tipo: "desfeita", de: "0.1.0", para: "0.2.0" });
+      expect(encerrados).toEqual([instalar.pid]);
+    } finally {
+      instalar.kill(process.platform === "win32" ? undefined : "SIGKILL");
+      await instalar.exited;
+    }
+  });
+});
+
 describe("a lista de troca", () => {
   test.each([
     ["package.json", "package.json"],

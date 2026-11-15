@@ -156,7 +156,7 @@ export interface OpcoesDoPalco {
   readonly versoes?: FonteDasVersoes;
 }
 
-const SEM_RELEASE: FonteDasVersoes = { endereco: new URL("http://127.0.0.1:9/versao.json"), chaves: [], prazoMs: 300 };
+const SEM_RELEASE: FonteDasVersoes = { endereco: new URL("http://127.0.0.1:9/versao.json"), chaves: [], prazoMs: 300, pacote: () => new URL("http://127.0.0.1:9/pacote.tar.gz") };
 
 export async function subirPalco(alvos: Alvos = {}, opcoes: OpcoesDoPalco = {}): Promise<Palco> {
   const doServidor = { sincronizacaoAutomatica: opcoes.sincronizacaoAutomatica ?? false, versoes: opcoes.versoes ?? SEM_RELEASE };

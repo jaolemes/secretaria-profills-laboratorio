@@ -22,7 +22,7 @@ describe("atualizacao pelo CLI", () => {
     release = await subirReleaseFalsa();
     await release.publicar(MAIS_NOVA);
     repo = mkdtempSync(join(tmpdir(), "secretaria-repo-"));
-    palco = await subirPalco({ dirRepo: repo }, { versoes: { endereco: release.endereco, chaves: release.chaves, prazoMs: 2_000 } });
+    palco = await subirPalco({ dirRepo: repo }, { versoes: release.fonte(2_000) });
   });
 
   afterAll(async () => {

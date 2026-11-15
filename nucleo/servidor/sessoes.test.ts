@@ -59,6 +59,24 @@ describe("sessões do painel", () => {
     }
   });
 
+  test("a aba aberta depois do clique não toma o lugar da que atualiza, até a reserva ser solta", async () => {
+    const { cofre, apagar } = cofreTemporario();
+    try {
+      const sessoes = await criarSessoes(cofre, () => 1_000_000);
+      const quemAtualiza = await entrar(sessoes);
+      expect(await sessoes.guardarParaORestart(quemAtualiza)).toBe(true);
+      const depoisDoClique = await entrar(sessoes);
+      expect(sessoes.valida(depoisDoClique)).toBe(true);
+      const noRestart = await criarSessoes(cofre, () => 1_000_000);
+      expect([noRestart.valida(quemAtualiza), noRestart.valida(depoisDoClique)]).toEqual([true, false]);
+      await sessoes.soltarReserva();
+      const depoisDaFalha = await criarSessoes(cofre, () => 1_000_000);
+      expect([depoisDaFalha.valida(quemAtualiza), depoisDaFalha.valida(depoisDoClique)]).toEqual([false, true]);
+    } finally {
+      apagar();
+    }
+  });
+
   test("cookie que não é de uma sessão emitida não é guardado", async () => {
     const { cofre, apagar } = cofreTemporario();
     try {

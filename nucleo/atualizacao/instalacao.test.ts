@@ -16,7 +16,7 @@ const DA_020 = {
 
 let release: ReleaseFalsa;
 let base: string;
-let chamadas: { argv: readonly string[]; cwd: string; tinha: string[] }[];
+let chamadas: { argv: readonly string[]; cwd: string; tinha: string[]; quieto?: boolean }[];
 
 beforeEach(async () => {
   release = await subirReleaseFalsa();
@@ -35,8 +35,8 @@ function opcoes(destino: string, extra: Partial<OpcoesDaInstalacao> = {}): Opcoe
     fonte: release.fonte(500),
     meuInicial: MEU_INICIAL,
     agora: new Date(2026, 10, 15, 9, 30, 12),
-    async rodar(argv, cwd) {
-      chamadas.push({ argv, cwd, tinha: existsSync(cwd) ? readdirSync(cwd).sort() : [] });
+    async rodar(argv, cwd, quieto) {
+      chamadas.push({ argv, cwd, tinha: existsSync(cwd) ? readdirSync(cwd).sort() : [], quieto });
       return 4;
     },
     avisar() {},
@@ -126,7 +126,7 @@ describe("instalar pela versão marcada", () => {
 
     const guardada = join(base, "secretaria-profills-antes-2026-11-15-093012");
     expect(desfecho).toEqual({ tipo: "instalada", versao: "0.2.0", guardada });
-    expect(chamadas).toEqual([{ argv: [process.execPath, "secretaria", "parar", "--json"], cwd: destino, tinha: expect.arrayContaining(["velho.txt", ".git"]) }]);
+    expect(chamadas).toEqual([{ argv: [process.execPath, "secretaria", "parar", "--json"], cwd: destino, tinha: expect.arrayContaining(["velho.txt", ".git"]), quieto: true }]);
     const novos = { "README.md": expect.any(String), "skills/.gitkeep": expect.any(String), "migracoes/.gitkeep": expect.any(String) };
     expect(retratoDaPasta(join(destino, "meu"))).toEqual({ ...meuAntes, ...novos });
     expect(readFileSync(join(destino, "meu", "AGENTS.md"), "utf8")).toBe("Regras do vendedor.\r\n");

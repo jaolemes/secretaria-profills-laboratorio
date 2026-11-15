@@ -580,7 +580,7 @@ async function instalarPelaVersao(opcoes) {
       return recusar2("pacote_recusado", extracao.detalhe);
     let guardada = null;
     if (pasta.tipo === "secretaria") {
-      const parada = await opcoes.rodar([process.execPath, "secretaria", "parar", "--json"], destino);
+      const parada = await opcoes.rodar([process.execPath, "secretaria", "parar", "--json"], destino, true);
       if (parada !== 0 && parada !== 4)
         opcoes.avisar("N\xE3o deu para fechar a Secret\xE1ria desta pasta. A troca tenta assim mesmo.");
       guardada = pastaLivre(path2.join(mae, `${path2.basename(destino)}-antes-${carimbo(opcoes.agora)}`));
@@ -620,7 +620,7 @@ function efeitosReais() {
   return {
     cwd: process.cwd(),
     agora: new Date,
-    rodar: (argv, cwd) => Bun.spawn([...argv], { cwd, stdio: ["inherit", "inherit", "inherit"] }).exited,
+    rodar: (argv, cwd, quieto = false) => Bun.spawn([...argv], { cwd, stdio: quieto ? ["ignore", "ignore", "ignore"] : ["inherit", "inherit", "inherit"] }).exited,
     escrever: (texto) => console.log(texto)
   };
 }

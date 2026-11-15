@@ -46,7 +46,8 @@ export interface OpcoesDaInstalacao {
   /** O esqueleto de `meu/`, que o pacote não traz: caminho dentro de `meu/` e conteúdo. Só cria o que falta. */
   readonly meuInicial: Readonly<Record<string, string>>;
   readonly agora: Date;
-  rodar(argv: readonly string[], cwd: string): Promise<number>;
+  /** `quieto` esconde a saída do comando, que não diz nada ao vendedor. */
+  rodar(argv: readonly string[], cwd: string, quieto?: boolean): Promise<number>;
   avisar(texto: string): void;
   /** Só o teste troca, para uma troca falhar no meio. */
   readonly renomear?: (de: string, para: string) => void;
@@ -197,7 +198,7 @@ export async function instalarPelaVersao(opcoes: OpcoesDaInstalacao): Promise<De
     let guardada: string | null = null;
     if (pasta.tipo === "secretaria") {
       // Uma Secretária aberta nesta pasta segura os arquivos; `4` é a saída de quem já estava parada.
-      const parada = await opcoes.rodar([process.execPath, "secretaria", "parar", "--json"], destino);
+      const parada = await opcoes.rodar([process.execPath, "secretaria", "parar", "--json"], destino, true);
       if (parada !== 0 && parada !== 4) opcoes.avisar("Não deu para fechar a Secretária desta pasta. A troca tenta assim mesmo.");
       guardada = pastaLivre(path.join(mae, `${path.basename(destino)}-antes-${carimbo(opcoes.agora)}`));
     }
@@ -238,7 +239,7 @@ export interface ConfiguracaoDoScript {
 export interface EfeitosDoScript {
   readonly cwd: string;
   readonly agora: Date;
-  rodar(argv: readonly string[], cwd: string): Promise<number>;
+  rodar(argv: readonly string[], cwd: string, quieto?: boolean): Promise<number>;
   escrever(texto: string): void;
 }
 
@@ -252,7 +253,7 @@ function efeitosReais(): EfeitosDoScript {
   return {
     cwd: process.cwd(),
     agora: new Date(),
-    rodar: (argv, cwd) => Bun.spawn([...argv], { cwd, stdio: ["inherit", "inherit", "inherit"] }).exited,
+    rodar: (argv, cwd, quieto = false) => Bun.spawn([...argv], { cwd, stdio: quieto ? ["ignore", "ignore", "ignore"] : ["inherit", "inherit", "inherit"] }).exited,
     escrever: (texto) => console.log(texto),
   };
 }

@@ -137,10 +137,10 @@ describe("o que segura o botão", () => {
   });
 
   describe("com o CRM conectado", () => {
-    async function subirComCrm(): Promise<Montado & { readonly crm: CrmFalso }> {
+    async function subirComCrm(publicar: OpcoesDaPublicacao = {}): Promise<Montado & { readonly crm: CrmFalso }> {
       let montado: Montado | null = null;
       const falso = (crm = iniciarCrmFalso({ agora: () => Date.parse(montado === null ? new Date().toISOString() : montado.p.bancada.ambiente.agora()) }));
-      montado = await subir({ crm: falso });
+      montado = await subir({ crm: falso, publicar });
       cadastrarClientes(falso);
       const { p } = montado;
       const eventos = await p.eventosDoPainel();
@@ -159,8 +159,7 @@ describe("o que segura o botão", () => {
       return { chegou, soltar };
     }
 
-    test("cartão em gravando: bloqueada até o CRM responder", async () => {
-      const { p, crm: falso } = await subirComCrm();
+    async function propor(p: Palco): Promise<{ readonly id: string; readonly hash: string; readonly versao: number }> {
       const proposto = (await (
         await p.agente("/api/escritas", {
           method: "POST",
@@ -168,9 +167,17 @@ describe("o que segura o botão", () => {
           body: JSON.stringify({ tool: "registrar_atendimento", dados: { cliente_id: 9201, assunto: "Ligação sobre o pedido", status: "Pendente", descricao: "Combinou retorno na sexta." } }),
         })
       ).json()) as { dados: { id: string; hash: string; versao: number } };
+      return proposto.dados;
+    }
+
+    const aprovar = (p: Palco, { id, hash, versao }: { readonly id: string; readonly hash: string; readonly versao: number }) =>
+      p.painel(`/api/escritas/${id}/aprovar`, { method: "POST", headers: JSON_NO_CORPO, body: JSON.stringify({ hash, versao }) });
+
+    test("cartão em gravando: bloqueada até o CRM responder", async () => {
+      const { p, crm: falso } = await subirComCrm();
+      const cartao = await propor(p);
       const crmSegurado = segurarOCrm(falso, "registrar_atendimento");
-      const { id, hash, versao } = proposto.dados;
-      const aprovado = p.painel(`/api/escritas/${id}/aprovar`, { method: "POST", headers: JSON_NO_CORPO, body: JSON.stringify({ hash, versao }) });
+      const aprovado = aprovar(p, cartao);
       await crmSegurado.chegou;
       await bloqueado(p, "gravando_no_crm");
       crmSegurado.soltar();
@@ -188,6 +195,35 @@ describe("o que segura o botão", () => {
       crmSegurado.soltar();
       expect((await sincronizando).status).toBe(200);
       expect(await estado(p)).toMatchObject({ fase: "versao_nova", bloqueio: null });
+    });
+
+    test("com a atualização em curso, aprovar, sincronizar e conectar esperam ela acabar", async () => {
+      let soltar = () => {};
+      const segurar = new Promise<void>((resolver) => (soltar = resolver));
+      const { p, crm: falso } = await subirComCrm({ pacoteAdulterado: new Uint8Array([1, 2, 3]), segurarPacote: segurar });
+      const cartao = await propor(p);
+      p.bancada.roteiro({ auth: PAREAR, sync: ESPELHAR });
+      await estado(p);
+      expect(await aplicar(p)).toMatchObject({ status: 200, dados: { fase: "atualizando", passo: "baixando" } });
+      const chamadas: string[] = [];
+      falso.botoes.aoChamar = (nome) => void chamadas.push(nome);
+      const recusas = await Promise.all([
+        envelope(aprovar(p, cartao)),
+        envelope(p.painel("/api/sincronizar", { method: "POST" })),
+        envelope(p.agente("/api/sincronizar", { method: "POST" })),
+        envelope(p.painel("/api/conectores/whatsapp/conectar", { method: "POST", headers: JSON_NO_CORPO, body: JSON.stringify({ meio: "qr" }) })),
+      ]);
+      expect(recusas.map((lido) => [lido.status, lido.ok ? null : lido.erro.codigo])).toEqual(Array(4).fill([409, "atualizacao_em_andamento"]));
+      expect(chamadas).toEqual([]);
+      const visto = (await (await p.agente(`/api/escritas/${cartao.id}`)).json()) as { dados: { estado: string } };
+      expect(visto.dados.estado).toBe("rascunho");
+      const painel = (await (await p.painel("/api/estado")).json()) as { dados: EstadoPainel };
+      expect(painel.dados.conectores.whatsapp.estado.fase).toBe("desconectado");
+      const eventos = await p.eventosDoPainel();
+      soltar();
+      await eventos.ateTexto('"fase":"falhou"', "a falha pelo SSE");
+      eventos.fechar();
+      expect((await aprovar(p, cartao)).status).toBe(200);
     });
   });
 });

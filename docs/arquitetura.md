@@ -1056,7 +1056,7 @@ Não verificado: o workflow ainda não rodou no GitHub. A montagem, a conferênc
 
 ## Descoberta de versão nova
 
-O servidor confere se há versão nova buscando o `versao.json` em `ENDERECO_DA_ULTIMA_VERSAO`. Quem busca é o servidor, nunca o navegador: a CSP do painel fica como está. Baixar o pacote e chamar o atualizador é da seção "Aplicar a versão nova". Nada disso aparece no painel nesta versão.
+O servidor confere se há versão nova buscando o `versao.json` em `ENDERECO_DA_ULTIMA_VERSAO`. Quem busca é o servidor, nunca o navegador: a CSP do painel fica como está. Baixar o pacote e chamar o atualizador é da seção "Aplicar a versão nova". O que o painel mostra está na seção "A tela da atualização".
 
 ### Quando busca
 
@@ -1189,11 +1189,15 @@ O O que muda sai como texto, numa lista: o React escapa a marcação, e nada vir
 
 A página carrega lendo `GET /api/atualizacao`, que é a abertura do painel e pode buscar a versão. Depois, relê com `?releitura=1`, que nunca busca, quando o SSE volta, um conector muda de fase, uma rodada começa ou termina, ou uma tarefa ou um cartão muda: o bloqueio depende deles, e o SSE manda `event: atualizacao` só quando a atualização muda de passo. O clique recusado com `atualizacao_bloqueada` traz o estado em `erro.atual`, e o cartão passa a mostrar a explicação.
 
-A página só sabe mostrar a versão em que carregou (`lerNaVolta`). Um estado de outra versão recarrega a página, para o navegador pegar o painel novo. Durante a atualização, ela espera a outra versão dizer `atualizado` antes de recarregar: o atualizador grava o fim só depois de o servidor novo responder. Quando o SSE cai em `atualizando`, o painel não mostra "Sem conexão com a Secretária": a cada 2 s, por até 3 min, ele pergunta `GET /api/info`, que não pede sessão, e, quando o servidor responde, relê a atualização. A mesma versão mostra o estado (a `falhou` da volta, por exemplo). A outra aba, sem a sessão que o servidor novo aceita, recarrega pela versão do `/api/info`. Passados os 3 min, o aviso de sem conexão volta.
+A página só sabe mostrar a versão em que carregou (`lerNaVolta`). Um estado de outra versão recarrega a página, para o navegador pegar o painel novo. Durante a atualização, ela espera a outra versão dizer `atualizado` antes de recarregar: o atualizador grava o fim só depois de o servidor novo responder. Quando o SSE cai em `atualizando`, o painel não mostra "Sem conexão com a Secretária": a cada 2 s, por até 3 min, ele pergunta `GET /api/info`, que não pede sessão, e, quando o servidor responde, relê a atualização. A mesma versão mostra o estado (a `falhou` da volta, por exemplo). A outra aba, sem a sessão que o servidor novo aceita, recarrega pela versão do `/api/info`. Passados os 3 min, o aviso de sem conexão volta. A queda e a desistência valem só para a atualização em curso (`acompanharAVolta`): quando a fase sai de `atualizando`, as duas zeram, e o Tentar de novo depois de um `falhou` sonda só se o canal cair de novo. A sonda é `sondarAVolta`, com o relógio e os pedidos passados por quem chama.
 
 `POST /api/painel/aberto` responde `atualizacao_em_andamento` (409) durante a atualização. O painel não lê a resposta dele, então nada aparece; a página que recarrega na versão nova faz o pedido de novo.
 
-`nucleo/painel/atualizacao.test.ts` cobre a vista de cada fase e `lerNaVolta`. `nucleo/painel/AvisoDaAtualizacao.test.tsx` desenha o cartão, a lateral recolhida e o Menu do celular em cada fase, com o botão apagado pelo bloqueio, os impedimentos sem botão e o O que muda com marcação, que sai como texto. `testes/manual/subir-atualizacao.ts` sobe o servidor de verdade contra a release falsa em cada estado, para ver no navegador.
+O cartão do pé guarda uma região `aria-live` sempre montada, e o aviso entra dentro dela: leitor de tela costuma não anunciar uma região que entra no DOM já com o texto.
+
+O painel só tem o tema escuro (`color-scheme: dark` em `nucleo/painel/estilos.css`, sem variante `dark:`), então o aviso sai igual com o sistema em modo claro.
+
+`nucleo/painel/atualizacao.test.ts` cobre a vista de cada fase, `lerNaVolta`, `acompanharAVolta` e `sondarAVolta` com relógio falso. `nucleo/painel/AvisoDaAtualizacao.test.tsx` desenha o cartão, a lateral recolhida e o Menu do celular em cada fase, com o botão apagado pelo bloqueio, os impedimentos sem botão, o O que muda com marcação, que sai como texto, e a região `aria-live` montada antes do aviso. `testes/manual/subir-atualizacao.ts` sobe o servidor de verdade contra a release falsa em cada estado, para ver no navegador.
 
 ## O atualizador
 

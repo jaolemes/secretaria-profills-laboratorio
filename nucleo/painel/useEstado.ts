@@ -1,6 +1,6 @@
 import { useEffect, useReducer } from "react";
 import { ROTA_DOS_EVENTOS } from "./api";
-import { CONEXAO_INICIAL, esperaParaReconectar, lerAndamento, lerEstadoPainel, reduzirConexao, type Conexao } from "./conexao";
+import { CONEXAO_INICIAL, esperaParaReconectar, lerAndamento, lerEstadoDaAtualizacao, lerEstadoPainel, reduzirConexao, type Conexao } from "./conexao";
 
 export function useEstado(): Conexao {
   const [conexao, despachar] = useReducer(reduzirConexao, CONEXAO_INICIAL);
@@ -24,6 +24,10 @@ export function useEstado(): Conexao {
       fonte.addEventListener("sincronizacao", (evento) => {
         const andamento = lerAndamento((evento as MessageEvent<string>).data);
         if (andamento !== null) despachar({ tipo: "sincronizacao", andamento });
+      });
+      fonte.addEventListener("atualizacao", (evento) => {
+        const estado = lerEstadoDaAtualizacao((evento as MessageEvent<string>).data);
+        if (estado !== null) despachar({ tipo: "atualizacao", estado });
       });
       fonte.addEventListener("error", () => {
         despachar({ tipo: "caiu" });

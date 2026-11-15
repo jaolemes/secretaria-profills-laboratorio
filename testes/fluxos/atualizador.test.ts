@@ -45,6 +45,25 @@ function rodarAbrir(): Resultado<unknown> {
   }
 }
 
+describe("a instalação mínima", () => {
+  test(
+    "pararServidor só volta com os bancos livres, também quando o lock sai depois do processo, como no Windows",
+    async () => {
+      instalacao = montarInstalacao();
+      const segurador = Bun.spawn([process.execPath, join(REPO, "testes", "falsos", "banco-que-solta-tarde.ts"), instalacao.dirDados, "1000"], { stdout: "pipe", stderr: "inherit" });
+      const { value } = await segurador.stdout.getReader().read();
+      expect(new TextDecoder().decode(value)).toBe("pronto\n");
+      expect(instalacao.pidDoServidor()).not.toBeNull();
+
+      await instalacao.pararServidor();
+
+      expect(instalacao.retratoDosBancos()).toMatchObject({ nucleo: { notas: [{ texto: "anotado antes da atualização" }] }, meu: { visitas: [{ cliente: "cliente do vendedor" }] } });
+      expect(await segurador.exited).toBe(0);
+    },
+    PRAZO_DO_TESTE_MS,
+  );
+});
+
 describe("o atualizador num processo próprio", () => {
   test(
     "a 0.1.0 vira a 0.2.0: o servidor novo responde, a migração nova rodou e o que é do vendedor fica igual byte a byte",

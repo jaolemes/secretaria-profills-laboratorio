@@ -27,10 +27,12 @@ const CLI = [
   "",
 ].join("\n");
 const TRAVA = (versaoDoWacli: string) => JSON.stringify({ wacli: { versao: versaoDoWacli } });
-const PACOTE = (versao: string) => JSON.stringify({ name: "secretaria-profills", version: versao, scripts: { secretaria: "bun nucleo/cli/main.ts" } });
+const DO_REPO = (caminho: string) => readFileSync(join(REPO, caminho), "utf8");
+const PACOTE = (versao: string) => JSON.stringify({ name: "secretaria-profills", version: versao, scripts: { secretaria: (JSON.parse(DO_REPO("package.json")) as { scripts: { secretaria: string } }).scripts.secretaria } });
 
 const COMUNS: Arquivos = {
   "nucleo/cli/main.ts": CLI,
+  "entrada.ts": DO_REPO("entrada.ts"),
   // Sem `node_modules`, o Bun tentaria baixar o pacote que falta: o teste não fala com a rede.
   "bunfig.toml": "[install]\nauto = \"disable\"\n",
   "nucleo/banco/migracoes/0001_base.sql": "CREATE TABLE notas (id INTEGER PRIMARY KEY, texto TEXT NOT NULL);\n",
@@ -57,7 +59,7 @@ const DA_020: Arquivos = {
   "nucleo/marca.txt": "0.2.0\n",
   "nucleo/banco/migracoes/0002_nova.sql": "CREATE TABLE novidade (id INTEGER PRIMARY KEY);\n",
   // O atualizador de verdade vai dentro da versão nova, como no pacote real.
-  "nucleo/atualizador/main.ts": readFileSync(join(REPO, "nucleo", "atualizador", "main.ts"), "utf8"),
+  "nucleo/atualizador/main.ts": DO_REPO("nucleo/atualizador/main.ts"),
   ".agents/skills/bom-dia/SKILL.md": "bom dia da 0.2.0\n",
   ".agents/skills/nova-skill/SKILL.md": "skill que chegou\n",
   ".claude/settings.json": JSON.stringify({ versao: "0.2.0" }),

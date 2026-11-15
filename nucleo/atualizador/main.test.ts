@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { abrirExclusivo } from "../banco/abrir";
 import { migrarInstalacao, montarInstalacao, retratoDaPasta, type InstalacaoMinima } from "../../testes/falsos/instalacao-minima";
 import {
   FASES,
@@ -12,6 +13,7 @@ import {
   efeitosReais,
   haAtualizacaoPendente,
   lerAndamento,
+  recomporArvore,
   recuperar,
   unidadeDaTroca,
   type Andamento,
@@ -313,6 +315,83 @@ describe("falha em cada passo deixa a 0.1.0 no ar com o banco igual", () => {
 
     expect((await rodar(efeitos)).tipo).toBe("desfeita");
     expect(recusas).toBe(1);
+  });
+});
+
+describe("a pasta nunca fica sem a porta do bun secretaria", () => {
+  const PORTAS = ["package.json", "entrada.ts"];
+
+  test("o package.json e o entrada.ts estão no lugar em cada rename da troca e da volta", async () => {
+    instalacao = montarInstalacao();
+    const reais = efeitosReais();
+    const faltaram: string[] = [];
+    const efeitos = efeitosDeTeste({
+      renomear(de, para) {
+        reais.renomear(de, para);
+        for (const porta of PORTAS) if (!existsSync(path.join(instalacao.raiz, porta))) faltaram.push(`${porta} depois de ${path.relative(instalacao.raiz, de)}`);
+      },
+      async instalar() {
+        return { ok: false, detalhe: "falha para forçar a volta" };
+      },
+    });
+
+    expect(await rodar(efeitos)).toMatchObject({ tipo: "desfeita" });
+    expect(faltaram).toEqual([]);
+  });
+
+  test("a versão nova entra por cima, e a antiga fica guardada em anterior/", async () => {
+    instalacao = montarInstalacao();
+    await rodar(efeitosDeTeste());
+    const { anterior } = caminhosDoAtualizador(instalacao.raiz, instalacao.dirDados);
+    expect(JSON.parse(readFileSync(path.join(instalacao.raiz, "package.json"), "utf8"))).toMatchObject({ version: "0.2.0" });
+    expect(JSON.parse(readFileSync(path.join(anterior, "package.json"), "utf8"))).toMatchObject({ version: "0.1.0" });
+  });
+});
+
+describe("recompor a pasta antes de carregar o CLI", () => {
+  const nucleoForaDoLugar = () => {
+    const { anterior, andamento } = caminhosDoAtualizador(instalacao.raiz, instalacao.dirDados);
+    mkdirSync(anterior, { recursive: true });
+    renameSync(path.join(instalacao.raiz, "nucleo"), path.join(anterior, "nucleo"));
+    writeFileSync(andamento, JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", trocas: [{ caminho: "nucleo", tinhaAntiga: true, temNova: true }] }));
+  };
+
+  test("com o núcleo antigo fora e o novo ainda em nova/, devolve o antigo e deixa a volta em desfazer", async () => {
+    instalacao = montarInstalacao();
+    const pasta = retratoDaPasta(instalacao.raiz);
+    const daNova = retratoDaPasta(instalacao.nova);
+    nucleoForaDoLugar();
+
+    expect(await recomporArvore(instalacao.raiz)).toEqual({ tipo: "recomposta" });
+
+    expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
+    expect(retratoDaPasta(instalacao.nova)).toEqual(daNova);
+    expect(andamentoNoDisco()).toMatchObject({ fase: "desfazer", falha: { passo: "trocar", motivo: "interrompida" } });
+    expect(await recomporArvore(instalacao.raiz)).toEqual({ tipo: "nada" });
+  });
+
+  test.each([
+    ["sem andamento", () => {}],
+    ["com andamento final", () => writeFileSync(caminhosDoAtualizador(instalacao.raiz, instalacao.dirDados).andamento, JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "desfeito" }))],
+    ["fora das fases da troca", () => writeFileSync(caminhosDoAtualizador(instalacao.raiz, instalacao.dirDados).andamento, JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "instalar" }))],
+  ])("%s, não faz nada", async (_nome, preparar) => {
+    instalacao = montarInstalacao();
+    preparar();
+    const pasta = retratoDaPasta(instalacao.raiz);
+    expect(await recomporArvore(instalacao.raiz)).toEqual({ tipo: "nada" });
+    expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
+  });
+
+  test("com a trava segura por outro processo, ou numa pasta com .git, não move nada", async () => {
+    instalacao = montarInstalacao();
+    nucleoForaDoLugar();
+    abertos.push(abrirExclusivo(caminhosDoAtualizador(instalacao.raiz, instalacao.dirDados).trava));
+    expect(await recomporArvore(instalacao.raiz)).toEqual({ tipo: "em_andamento" });
+    fecharServidores();
+
+    mkdirSync(path.join(instalacao.raiz, ".git"));
+    expect(await recomporArvore(instalacao.raiz)).toEqual({ tipo: "nada" });
+    expect(existsSync(path.join(instalacao.raiz, "nucleo"))).toBe(false);
   });
 });
 

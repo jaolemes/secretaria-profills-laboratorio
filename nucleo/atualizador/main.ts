@@ -7,7 +7,7 @@
  */
 import { Database } from "bun:sqlite";
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, closeSync, copyFileSync, cpSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 /** Os passos, na ordem em que rodam. O `andamento.json` diz em qual o atualizador está. */
@@ -110,6 +110,8 @@ export function caminhosDoAtualizador(raizDoRepo: string, dirDados: string) {
     nova: path.join(pasta, "nova"),
     anterior: path.join(pasta, "anterior"),
     andamento: path.join(pasta, "andamento.json"),
+    /** Cópia deste arquivo, fora das pastas trocadas: o `entrada.ts` a roda quando a troca parou no meio. */
+    atualizadorGuardado: path.join(pasta, "atualizador.ts"),
     /** SQLite vazio que o atualizador segura enquanto vive. O sistema solta o lock quando o processo morre. */
     trava: path.join(pasta, "trava.db"),
     banco: path.join(dirDados, "secretaria.db"),
@@ -229,7 +231,7 @@ export function lerAndamento(caminho: string): AndamentoLido {
   let contagem: Andamento["mudados"] = null;
   if (mudados !== null) {
     if (!ehObjeto(mudados) || typeof mudados.quantos !== "number" || !Array.isArray(mudados.caminhos)) return { tipo: "ilegivel" };
-    contagem = { quantos: mudados.quantos, caminhos: (mudados.caminhos as unknown[]).filter((item): item is string => typeof item === "string") };
+    contagem = { quantos: mudados.quantos as number, caminhos: (mudados.caminhos as unknown[]).filter((item): item is string => typeof item === "string") };
   }
   let motivoDaFalha: Andamento["falha"] = null;
   if (falha !== null) {
@@ -306,6 +308,17 @@ class Falha extends Error {
 
 const USO_NO_WINDOWS = ["EPERM", "EBUSY", "EACCES"];
 
+function tipoDe(caminho: string): "arquivo" | "link" | "outro" | null {
+  try {
+    const estado = lstatSync(caminho);
+    return estado.isSymbolicLink() ? "link" : estado.isFile() ? "arquivo" : "outro";
+  } catch {
+    return null;
+  }
+}
+
+const ehArquivo = (caminho: string) => tipoDe(caminho) === "arquivo";
+
 /** As operações sobre uma instalação. Tudo aqui chega ao mesmo fim se rodar de novo. */
 function operacoes(raizDoRepo: string, dirDados: string, prazos: Prazos, efeitos: Efeitos) {
   const caminhos = caminhosDoAtualizador(raizDoRepo, dirDados);
@@ -326,13 +339,30 @@ function operacoes(raizDoRepo: string, dirDados: string, prazos: Prazos, efeitos
     }
   }
 
+  /** Copia o arquivo por um nome temporário: `destino` só aparece inteiro. */
+  async function copiarArquivo(de: string, destino: string): Promise<void> {
+    const parcial = `${destino}.parcial`;
+    mkdirSync(path.dirname(destino), { recursive: true });
+    efeitos.copiar(de, parcial);
+    await renomear(parcial, destino);
+  }
+
+  /**
+   * Arquivo no lugar de arquivo troca sem buraco: a cópia da antiga vai para `anterior/` e a nova
+   * entra por cima, num rename só. Assim o `package.json` e o `entrada.ts`, por onde o
+   * `bun secretaria` começa, nunca faltam. Pasta não entra por cima de pasta: ela sai e a nova
+   * entra, e o buraco entre os dois renames é o que o `entrada.ts` sabe recompor.
+   */
   async function trocar(troca: Troca): Promise<void> {
     const noRepo = em(raizDoRepo, troca.caminho);
     const naNova = em(caminhos.nova, troca.caminho);
     const naAnterior = em(caminhos.anterior, troca.caminho);
     if (troca.tinhaAntiga && !existsSync(naAnterior)) {
-      mkdirSync(path.dirname(naAnterior), { recursive: true });
-      await renomear(noRepo, naAnterior);
+      if (ehArquivo(noRepo) && ehArquivo(naNova)) await copiarArquivo(noRepo, naAnterior);
+      else {
+        mkdirSync(path.dirname(naAnterior), { recursive: true });
+        await renomear(noRepo, naAnterior);
+      }
     }
     if (troca.temNova && existsSync(naNova)) {
       mkdirSync(path.dirname(noRepo), { recursive: true });
@@ -340,19 +370,34 @@ function operacoes(raizDoRepo: string, dirDados: string, prazos: Prazos, efeitos
     }
   }
 
-  async function destrocar(troca: Troca): Promise<void> {
+  /** Verdadeiro quando moveu alguma coisa. */
+  async function destrocar(troca: Troca): Promise<boolean> {
     const noRepo = em(raizDoRepo, troca.caminho);
     const naNova = em(caminhos.nova, troca.caminho);
     const naAnterior = em(caminhos.anterior, troca.caminho);
     // O que está no repo só é da versão nova se a antiga já saiu (ou nunca existiu) e a nova não está mais em `nova/`.
+    let moveu = false;
     if (troca.temNova && !existsSync(naNova) && existsSync(noRepo) && (!troca.tinhaAntiga || existsSync(naAnterior))) {
-      mkdirSync(path.dirname(naNova), { recursive: true });
-      await renomear(noRepo, naNova);
+      if (troca.tinhaAntiga && ehArquivo(noRepo) && ehArquivo(naAnterior)) await copiarArquivo(noRepo, naNova);
+      else {
+        mkdirSync(path.dirname(naNova), { recursive: true });
+        await renomear(noRepo, naNova);
+      }
+      moveu = true;
     }
     if (troca.tinhaAntiga && existsSync(naAnterior)) {
       mkdirSync(path.dirname(noRepo), { recursive: true });
       await renomear(naAnterior, noRepo);
+      moveu = true;
     }
+    return moveu;
+  }
+
+  /** Quantas entradas voltaram de lugar. */
+  async function desfazerTrocas(andamento: Andamento): Promise<number> {
+    let movidas = 0;
+    for (const troca of [...andamento.trocas].reverse()) if (await destrocar(troca)) movidas += 1;
+    return movidas;
   }
 
   const BANCOS = ["secretaria.db", "meu.db"];
@@ -360,6 +405,8 @@ function operacoes(raizDoRepo: string, dirDados: string, prazos: Prazos, efeitos
 
   return {
     caminhos,
+
+    bancosLivres: () => efeitos.bancoLivre(caminhos.banco),
 
     /** Confere a versão nova, monta o plano e conta o que o agente do vendedor mudou no núcleo. Não muda nada além de limpar `anterior/`. */
     preparar(): Pick<Andamento, "trocas" | "mudados"> {
@@ -403,8 +450,12 @@ function operacoes(raizDoRepo: string, dirDados: string, prazos: Prazos, efeitos
       return { trocas, mudados };
     },
 
-    /** Copia os bancos, o `meu/` e, se a trava mudou, o wacli. A pasta `antes/` só aparece com a cópia inteira. */
+    /**
+     * Guarda este arquivo fora das pastas trocadas e copia os bancos, o `meu/` e, se a trava mudou,
+     * o wacli. A pasta `antes/` só aparece com a cópia inteira.
+     */
     async copiar(versao: string): Promise<void> {
+      await copiarArquivo(import.meta.path, caminhos.atualizadorGuardado);
       const antes = caminhos.copias(versao);
       const parcial = `${antes}.parcial`;
       rmSync(parcial, { recursive: true, force: true });
@@ -437,9 +488,11 @@ function operacoes(raizDoRepo: string, dirDados: string, prazos: Prazos, efeitos
       for (const troca of trocas) await trocar(troca);
     },
 
+    desfazerTrocas,
+
     /** A volta: devolve cada entrada na ordem inversa e, se o banco pôde ter migrado, as cópias de `antes/`. */
     async desfazer(andamento: Andamento): Promise<void> {
-      for (const troca of [...andamento.trocas].reverse()) await destrocar(troca);
+      await desfazerTrocas(andamento);
       if (!andamento.restaurarDados || andamento.para === null) return;
       const antes = caminhos.copias(andamento.para);
       if (!existsSync(antes)) return;
@@ -539,7 +592,7 @@ export async function atualizar(
     });
 
     gravar({});
-    if (!(await esperarAte(() => efeitos.bancoLivre(caminhos.banco), prazos.bancoMs, prazos.intervaloMs))) {
+    if (!(await esperarAte(ops.bancosLivres, prazos.bancoMs, prazos.intervaloMs))) {
       const detalhe = `o banco seguiu em uso por ${Math.round(prazos.bancoMs / 1000)} s`;
       return { tipo: "desfeita", andamento: gravar({ fase: "desfeito", falha: { passo: "esperar_banco", motivo: "banco_em_uso", detalhe } }), servidorNoAr: false };
     }
@@ -567,7 +620,7 @@ export async function atualizar(
     } catch (erro) {
       gravar({ fase: "desfazer", falha: falhaEm(passo, erro) });
       try {
-        if (!(await esperarAte(() => efeitos.bancoLivre(caminhos.banco), prazos.bancoMs, prazos.intervaloMs))) throw new Error("o banco seguiu em uso");
+        if (!(await esperarAte(ops.bancosLivres, prazos.bancoMs, prazos.intervaloMs))) throw new Error("o banco seguiu em uso");
         await ops.desfazer(andamento);
       } catch (naVolta) {
         return { tipo: "volta_incompleta", andamento, detalhe: mensagem(naVolta) };
@@ -600,6 +653,21 @@ export type Recuperacao =
   | { readonly tipo: "banco_em_uso" }
   | { readonly tipo: "falhou"; readonly detalhe: string };
 
+/** As fases em que a pasta pode estar rasgada, com uma entrada fora do lugar. */
+const RASGAM: readonly Fase[] = ["trocar", "desfazer"];
+
+function falhaDaQueda(andamento: Andamento): NonNullable<Andamento["falha"]> {
+  const passo: Passo = (PASSOS as readonly string[]).includes(andamento.fase) ? (andamento.fase as Passo) : "esperar_banco";
+  return andamento.falha ?? { passo, motivo: "interrompida", detalhe: "o atualizador parou antes de terminar" };
+}
+
+function regravar(caminho: string, andamento: Andamento, mudanca: Partial<Andamento>, efeitos: Efeitos): Andamento {
+  const novo = { ...andamento, ...mudanca, atualizadoEm: new Date().toISOString() };
+  gravarAndamento(caminho, novo);
+  efeitos.observar(novo);
+  return novo;
+}
+
 /**
  * A volta de uma atualização que morreu no meio. Com o servidor parado, desfaz o que estiver em
  * `.atualizacao/anterior/`, devolve as cópias e grava `desfeito`: quem chama sobe o servidor,
@@ -621,24 +689,51 @@ export async function recuperar(
     if (lido.tipo === "ausente" || ehFinal(lido.andamento.fase)) return { tipo: "nada" };
     const { andamento } = lido;
     const { de, para } = andamento;
-    const gravar = (mudanca: Partial<Andamento>) => {
-      const novo = { ...andamento, ...mudanca, atualizadoEm: new Date().toISOString() };
-      gravarAndamento(caminhos.andamento, novo);
-      efeitos.observar(novo);
-    };
+    const gravar = (mudanca: Partial<Andamento>) => regravar(caminhos.andamento, andamento, mudanca, efeitos);
+    const falha = falhaDaQueda(andamento);
     if (opcoes.versaoNoAr !== null) {
       // Com um servidor no ar, a pasta não muda. Se ele já é o da versão nova, a atualização deu certo.
       if (andamento.fase !== "subir" || opcoes.versaoNoAr !== para) return { tipo: "nada" };
       gravar({ fase: "concluido" });
       return { tipo: "concluida", de, para };
     }
-    if (!efeitos.bancoLivre(caminhos.banco)) return { tipo: "banco_em_uso" };
-    const passo: Passo = (PASSOS as readonly string[]).includes(andamento.fase) ? (andamento.fase as Passo) : "esperar_banco";
-    const falha = andamento.falha ?? { passo, motivo: "interrompida" as const, detalhe: "o atualizador parou antes de terminar" };
+    if (!ops.bancosLivres()) return { tipo: "banco_em_uso" };
     if (andamento.fase !== "desfazer") gravar({ fase: "desfazer", falha });
     await ops.desfazer(andamento);
     gravar({ fase: "desfeito", falha });
     return { tipo: "desfeita", de, para };
+  } catch (erro) {
+    return { tipo: "falhou", detalhe: mensagem(erro) };
+  } finally {
+    trava.soltar();
+  }
+}
+
+/** `recomposta`: alguma entrada voltou de lugar. `nada`: a pasta já estava inteira. */
+export type Recomposicao = { readonly tipo: "nada" } | { readonly tipo: "em_andamento" } | { readonly tipo: "recomposta" } | { readonly tipo: "falhou"; readonly detalhe: string };
+
+/**
+ * Põe de volta as entradas de uma troca que morreu no meio, sem tocar na pasta de dados. O
+ * `entrada.ts` roda isto da cópia em `.atualizacao/` antes de carregar o CLI, porque com `nucleo/`
+ * ou `node_modules/` fora do lugar o CLI nem carrega. O andamento fica em `desfazer`: devolver os
+ * bancos e gravar o fim é do `recuperar`, no `abrir`.
+ */
+export async function recomporArvore(raizDoRepo: string, efeitos: Efeitos = efeitosReais()): Promise<Recomposicao> {
+  if (existsSync(path.join(raizDoRepo, ".git"))) return { tipo: "nada" };
+  const ops = operacoes(raizDoRepo, "", PRAZOS, efeitos);
+  const { caminhos } = ops;
+  const rasgada = () => {
+    const lido = lerAndamento(caminhos.andamento);
+    return lido.tipo === "lido" && RASGAM.includes(lido.andamento.fase) ? lido.andamento : null;
+  };
+  if (rasgada() === null) return { tipo: "nada" };
+  const trava = segurarTrava(caminhos.trava);
+  if (trava === null) return { tipo: "em_andamento" };
+  try {
+    const andamento = rasgada();
+    if (andamento === null) return { tipo: "nada" };
+    if (andamento.fase !== "desfazer") regravar(caminhos.andamento, andamento, { fase: "desfazer", falha: falhaDaQueda(andamento) }, efeitos);
+    return (await ops.desfazerTrocas(andamento)) > 0 ? { tipo: "recomposta" } : { tipo: "nada" };
   } catch (erro) {
     return { tipo: "falhou", detalhe: mensagem(erro) };
   } finally {

@@ -9,6 +9,7 @@ Base pessoal e local de um vendedor da Profills. Um servidor em `127.0.0.1` liga
 | `nucleo/` | Código da Profills: domínio, banco, cofre, conectores, processos, servidor, CLI, painel, instalador. Não edite a pedido do vendedor. |
 | `meu/` | Código e regras do vendedor. Skill `secretaria-estender`. |
 | `testes/` | Falsos, fluxos e conferências de fronteira e de auditoria. |
+| `novidades/` | O "O que muda" de cada versão, um arquivo por versão, em palavras de vendedor. Regra em `docs/arquitetura.md`, seção "Versão e novidades". |
 | `.agents/skills/` | Fonte das skills. `.claude/skills/` é cópia gerada por `bun secretaria instalar`; não edite a cópia. |
 
 Os dados do vendedor ficam na pasta de dados do sistema, fora do repo: `~/.local/share/secretaria-profills` (Linux), `~/Library/Application Support/SecretariaProfills` (macOS), `%LOCALAPPDATA%\SecretariaProfills` (Windows), ou `SECRETARIA_DADOS`.

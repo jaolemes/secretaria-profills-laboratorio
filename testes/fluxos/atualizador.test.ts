@@ -219,10 +219,9 @@ describe("matar o atualizador e rodar abrir volta à 0.1.0", () => {
         { raizDoRepo: instalacao.raiz, dirDados: instalacao.dirDados },
         {
           ...reais,
-          async instalar(raizDoRepo, dirDados, prazoMs) {
+          iniciarInstalar(raizDoRepo, dirDados) {
             chegou();
-            await segurando;
-            return reais.instalar(raizDoRepo, dirDados, prazoMs);
+            return { pid: undefined, fim: segurando.then(() => reais.iniciarInstalar(raizDoRepo, dirDados).fim) };
           },
         },
       );
@@ -294,7 +293,6 @@ describe("matar o atualizador com o instalar da versão nova ainda vivo", () => 
       atualizador.kill(process.platform === "win32" ? undefined : "SIGKILL");
       await atualizador.exited;
       await travaLivre();
-      expect(vivo(instalar)).toBe(true);
 
       const aberto = rodarAbrir();
 
@@ -311,15 +309,25 @@ describe("matar o atualizador com o instalar da versão nova ainda vivo", () => 
   );
 
   test(
-    "o prazo do instalar encerra também os processos que ele subiu",
+    "encerrar o instalar encerra também os processos que ele subiu",
     async () => {
       instalacao = montarInstalacao();
       writeFileSync(join(instalacao.raiz, "instalar-com-neto"), "");
+      const efeitos = efeitosReais();
 
-      const instalado = await efeitosReais().instalar(instalacao.raiz, instalacao.dirDados, 3_000);
+      const instalando = efeitos.iniciarInstalar(instalacao.raiz, instalacao.dirDados);
+      if (instalando.pid === undefined) throw new Error("o instalar não nasceu");
+      soltos.push(instalando.pid);
+      const neto = await pidAnunciado("neto");
+      const inicio = efeitos.inicioDoProcesso(instalando.pid);
+      expect(efeitos.processoVivo(instalando.pid, inicio)).toBe(true);
+      expect(efeitos.processoVivo(instalando.pid, "outra hora")).toBe(false);
 
-      expect(instalado.ok).toBe(false);
-      expect(await morreu(await pidAnunciado("neto"))).toBe(true);
+      expect(await efeitos.encerrarArvore(instalando.pid)).toBe(true);
+
+      expect(await instalando.fim).toMatchObject({ ok: false });
+      expect(efeitos.processoVivo(instalando.pid, inicio)).toBe(false);
+      expect(await morreu(neto)).toBe(true);
     },
     PRAZO_DO_TESTE_MS,
   );

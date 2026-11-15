@@ -18,10 +18,20 @@ import {
   type Andamento,
   type Efeitos,
   type Fase,
+  type Instalado,
   type Prazos,
+  type ProcessoDaAtualizacao,
 } from "./main";
 
-const PRAZOS_CURTOS: Partial<Prazos> = { bancoMs: 60, servidorMs: 60, intervaloMs: 5, esperasDoRenameMs: [1, 1] };
+const PRAZOS_CURTOS: Partial<Prazos> = { bancoMs: 60, soltarBancoMs: 60, servidorMs: 60, intervaloMs: 5, esperasDoRenameMs: [1, 1] };
+/** O pid do primeiro servidor de mentira. Não é pid de processo nenhum: os efeitos de processo do teste nunca chegam ao sistema. */
+const PRIMEIRO_SERVIDOR = 1001;
+const PID_DO_INSTALAR = 4242;
+
+/** Um `instalar` de mentira, que roda dentro do processo do teste. */
+const instalando =
+  (instalar: (raizDoRepo: string, dirDados: string) => Promise<Instalado>): Efeitos["iniciarInstalar"] =>
+  (raizDoRepo, dirDados) => ({ pid: undefined, fim: instalar(raizDoRepo, dirDados) });
 
 let instalacao: InstalacaoMinima;
 let abertos: Database[] = [];
@@ -44,12 +54,16 @@ function efeitosDeTeste(mudancas: Partial<Efeitos> = {}): Efeitos & { readonly f
   let subidas = 0;
   return {
     ...reais,
-    async instalar(raizDoRepo, dirDados) {
+    iniciarInstalar: instalando(async (raizDoRepo, dirDados) => {
       migrarInstalacao(raizDoRepo, dirDados).close(true);
       return { ok: true };
-    },
+    }),
+    inicioDoProcesso: () => null,
+    processoVivo: () => false,
+    encerrarArvore: async () => true,
     subirServidor(raizDoRepo, dirDados) {
-      const pid = (subidas += 1);
+      const pid = PRIMEIRO_SERVIDOR + subidas;
+      subidas += 1;
       let banco: Database | null = null;
       try {
         banco = migrarInstalacao(raizDoRepo, dirDados);
@@ -72,7 +86,7 @@ function efeitosDeTeste(mudancas: Partial<Efeitos> = {}): Efeitos & { readonly f
       };
     },
     versaoNoAr: async (_dirDados, pid) => doPid.get(pid ?? 0) ?? null,
-    observar: (andamento) => void fases.push(andamento.fase),
+    observar: (andamento) => void (fases.at(-1) === andamento.fase || fases.push(andamento.fase)),
     ...mudancas,
     fases,
     versoesNoAr,
@@ -235,17 +249,17 @@ describe("falha em cada passo deixa a 0.1.0 no ar com o banco igual", () => {
       "instalar",
       {
         efeitos: () => ({
-          async instalar(raizDoRepo, dirDados) {
+          iniciarInstalar: instalando(async (raizDoRepo, dirDados) => {
             migrarInstalacao(raizDoRepo, dirDados).close(true);
             return { ok: false, detalhe: "o wacli novo não respondeu" };
-          },
+          }),
         }),
         motivo: "instalar_falhou",
         subiuAntiga: true,
       },
     ],
     // O primeiro servidor, o da versão nova, abre o banco e nunca atende. O da antiga, depois da volta, atende.
-    ["subir", { efeitos: () => ({ versaoNoAr: async (_dirDados, pid) => (pid === 1 ? null : "0.1.0") }), motivo: "servidor_nao_subiu", subiuAntiga: true }],
+    ["subir", { efeitos: () => ({ versaoNoAr: async (_dirDados, pid) => (pid === PRIMEIRO_SERVIDOR ? null : "0.1.0") }), motivo: "servidor_nao_subiu", subiuAntiga: true }],
   ];
 
   test.each(casos)("falha em %s", async (passo, caso) => {
@@ -363,9 +377,7 @@ describe("a pasta nunca fica sem a porta do bun secretaria", () => {
         reais.renomear(de, para);
         for (const porta of PORTAS) if (!existsSync(path.join(instalacao.raiz, porta))) faltaram.push(`${porta} depois de ${path.relative(instalacao.raiz, de)}`);
       },
-      async instalar() {
-        return { ok: false, detalhe: "falha para forçar a volta" };
-      },
+      iniciarInstalar: instalando(async () => ({ ok: false, detalhe: "falha para forçar a volta" })),
     });
 
     expect(await rodar(efeitos)).toMatchObject({ tipo: "desfeita" });
@@ -437,12 +449,12 @@ describe("um atualizador por vez", () => {
     const segurando = new Promise<void>((resolver) => (soltar = resolver));
     const primeiro = rodar(
       efeitosDeTeste({
-        async instalar(raizDoRepo, dirDados) {
+        iniciarInstalar: instalando(async (raizDoRepo, dirDados) => {
           chegou();
           await segurando;
           migrarInstalacao(raizDoRepo, dirDados).close(true);
           return { ok: true };
-        },
+        }),
       }),
     );
     await noInstalar;
@@ -534,6 +546,14 @@ describe("a volta de uma atualização que morreu no meio", () => {
     expect(andamentoNoDisco().fase).toBe("instalar");
   });
 
+  test("com o lock do banco que solta depois do processo, como no Windows, espera e desfaz", async () => {
+    instalacao = montarInstalacao();
+    gravar({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "instalar", restaurarDados: true });
+    let sondas = 0;
+    expect(await voltar(null, efeitosDeTeste({ bancoLivre: () => (sondas += 1) > 3 }))).toEqual({ tipo: "desfeita", de: "0.1.0", para: "0.2.0" });
+    expect(andamentoNoDisco().fase).toBe("desfeito");
+  });
+
   test("pasta com .git não é tocada pela volta", async () => {
     instalacao = montarInstalacao();
     gravar({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", trocas: [{ caminho: "nucleo", tinhaAntiga: true, temNova: true }] });
@@ -549,7 +569,9 @@ describe("a volta de uma atualização que morreu no meio", () => {
     ["plano que aponta o meu/", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", trocas: [{ caminho: "meu", tinhaAntiga: true, temNova: false }] })],
     ["contagem de arquivos mudados que não é inteira", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", mudados: { quantos: 1.5, caminhos: [] } })],
     ["contagem de arquivos mudados negativa", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", mudados: { quantos: -1, caminhos: [] } })],
-    ["plano que aponta as permissões locais", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", trocas: [{ caminho: ".claude/settings.local.json", tinhaAntiga: true, temNova: false }] })],
+    ["processo com um pid que alcançaria todos os processos", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "instalar", processo: { papel: "instalar", pid: 1, inicio: null } })],
+    ["processo de um papel que esta versão não conhece", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "instalar", processo: { papel: "outro", pid: 4242, inicio: null } })],
+    ["plano que aponta as permissões locais",JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", trocas: [{ caminho: ".claude/settings.local.json", tinhaAntiga: true, temNova: false }] })],
   ])("andamento com %s não manda em rename nenhum", async (_nome, texto) => {
     instalacao = montarInstalacao();
     const pasta = retratoDaPasta(instalacao.raiz);
@@ -558,6 +580,96 @@ describe("a volta de uma atualização que morreu no meio", () => {
     expect(await voltar(null)).toMatchObject({ tipo: "falhou" });
     expect(await rodar(efeitosDeTeste())).toEqual({ tipo: "recusada", motivo: "atualizacao_interrompida" });
     expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
+  });
+});
+
+describe("o processo que o atualizador subiu", () => {
+  const INSTALAR: ProcessoDaAtualizacao = { papel: "instalar", pid: PID_DO_INSTALAR, inicio: "hora do instalar" };
+
+  /** Um `instalar` que nunca termina sozinho e um sistema de mentira em que ele vive até ser encerrado. */
+  function instalarQueNaoTermina(encerra: boolean) {
+    const encerrados: number[] = [];
+    let vivo = true;
+    let sair = (_instalado: Instalado) => {};
+    const efeitos = efeitosDeTeste({
+      iniciarInstalar: () => ({ pid: PID_DO_INSTALAR, fim: new Promise<Instalado>((resolver) => (sair = resolver)) }),
+      inicioDoProcesso: () => INSTALAR.inicio,
+      processoVivo: (pid, inicio) => vivo && pid === INSTALAR.pid && inicio === INSTALAR.inicio,
+      async encerrarArvore(pid) {
+        encerrados.push(pid);
+        if (!encerra) return false;
+        vivo = false;
+        sair({ ok: false, detalhe: "encerrado" });
+        return true;
+      },
+    });
+    return { efeitos, encerrados, morrer: () => (vivo = false) };
+  }
+
+  const comPrazoCurto = (efeitos: Efeitos) => atualizar({ raizDoRepo: instalacao.raiz, dirDados: instalacao.dirDados, prazos: { ...PRAZOS_CURTOS, instalarMs: 20 } }, efeitos);
+
+  test("o andamento diz o instalar e o servidor enquanto vivem, e nenhum no fim", async () => {
+    instalacao = montarInstalacao();
+    const vistos: string[] = [];
+    const efeitos = efeitosDeTeste({
+      iniciarInstalar: () => ({ pid: PID_DO_INSTALAR, fim: Promise.resolve().then(() => (migrarInstalacao(instalacao.raiz, instalacao.dirDados).close(true), { ok: true as const })) }),
+      inicioDoProcesso: (pid) => `hora do ${pid}`,
+      observar: ({ fase, processo }) => void vistos.push(`${fase}: ${processo === null ? "nenhum" : `${processo.papel} ${processo.pid} ${processo.inicio}`}`),
+    });
+
+    expect((await rodar(efeitos)).tipo).toBe("concluida");
+
+    expect(vistos.slice(vistos.indexOf("instalar: nenhum"))).toEqual([
+      "instalar: nenhum",
+      `instalar: instalar ${PID_DO_INSTALAR} null`,
+      `instalar: instalar ${PID_DO_INSTALAR} hora do ${PID_DO_INSTALAR}`,
+      "subir: nenhum",
+      `subir: servidor ${PRIMEIRO_SERVIDOR} null`,
+      `subir: servidor ${PRIMEIRO_SERVIDOR} hora do ${PRIMEIRO_SERVIDOR}`,
+      "concluido: nenhum",
+    ]);
+  });
+
+  test("o instalar que passa do prazo é encerrado, com o que ele subiu, antes de a troca voltar", async () => {
+    instalacao = montarInstalacao();
+    const pasta = retratoDaPasta(instalacao.raiz);
+    const { efeitos, encerrados } = instalarQueNaoTermina(true);
+
+    const desfecho = await comPrazoCurto(efeitos);
+
+    expect(desfecho).toMatchObject({ tipo: "desfeita", servidorNoAr: true, andamento: { fase: "desfeito", processo: null, falha: { passo: "instalar", motivo: "instalar_falhou" } } });
+    expect(encerrados).toEqual([PID_DO_INSTALAR]);
+    expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
+  });
+
+  test("com o instalar vivo que não encerra, ninguém mexe na pasta, e a volta termina quando ele some", async () => {
+    instalacao = montarInstalacao();
+    const pasta = retratoDaPasta(instalacao.raiz);
+    const bancos = instalacao.retratoDosBancos();
+    const { efeitos, morrer } = instalarQueNaoTermina(false);
+
+    expect(await comPrazoCurto(efeitos)).toMatchObject({ tipo: "volta_incompleta", andamento: { fase: "desfazer", processo: INSTALAR } });
+    const daNova = retratoDaPasta(instalacao.raiz);
+    expect(daNova).not.toEqual(pasta);
+
+    expect(await recomporArvore(instalacao.raiz, efeitos)).toEqual({ tipo: "em_andamento" });
+    const voltar = () => recuperar({ raizDoRepo: instalacao.raiz, dirDados: instalacao.dirDados, versaoNoAr: null, prazos: PRAZOS_CURTOS }, efeitos);
+    expect(await voltar()).toEqual({ tipo: "processo_preso", papel: "instalar", pid: PID_DO_INSTALAR });
+    expect(retratoDaPasta(instalacao.raiz)).toEqual(daNova);
+    expect(andamentoNoDisco()).toMatchObject({ fase: "desfazer", processo: INSTALAR });
+
+    morrer();
+    expect(await voltar()).toEqual({ tipo: "desfeita", de: "0.1.0", para: "0.2.0" });
+    expect(andamentoNoDisco()).toMatchObject({ fase: "desfeito", processo: null });
+    expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
+    expect(instalacao.retratoDosBancos()).toEqual(bancos);
+  });
+
+  test("o andamento gravado sem o campo do processo é lido como nenhum processo", () => {
+    instalacao = montarInstalacao();
+    const { processo: _semOCampo, ...antigo } = andamentoPreparado("0.1.0", "0.2.0");
+    writeFileSync(caminhosDoAtualizador(instalacao.raiz, instalacao.dirDados).andamento, JSON.stringify({ ...antigo, fase: "instalar" }));
+    expect(andamentoNoDisco()).toMatchObject({ fase: "instalar", processo: null });
   });
 });
 

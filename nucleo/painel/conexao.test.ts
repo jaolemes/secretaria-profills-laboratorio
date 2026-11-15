@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AndamentoDaSincronizacao } from "../conectores";
-import { CONEXAO_INICIAL, chaveDosConectores, esperaParaReconectar, lerAndamento, lerEstadoPainel, podeAgir, reduzirConexao, type EventoDaConexao } from "./conexao";
+import { CONEXAO_INICIAL, chaveDosConectores, esperaParaReconectar, lerAndamento, lerEstadoDaAtualizacao, lerEstadoPainel, podeAgir, reduzirConexao, type EventoDaConexao } from "./conexao";
 import { SINCRONIZACAO_PARADA, rotuloDaSincronizacao } from "./meu-dia";
 import { montarCena } from "./dev/cenas";
 
@@ -10,33 +10,33 @@ const conectado = montarCena("tudo-conectado", agora)!;
 
 describe("conexão com o SSE", () => {
   test("começa conectando, sem estado e sem ações", () => {
-    expect(CONEXAO_INICIAL).toEqual({ estado: null, canal: "conectando", mudancasDeTarefas: 0, sincronizacao: SINCRONIZACAO_PARADA, rodadasTerminadas: 0 });
+    expect(CONEXAO_INICIAL).toEqual({ estado: null, canal: "conectando", mudancasDeTarefas: 0, sincronizacao: SINCRONIZACAO_PARADA, rodadasTerminadas: 0, atualizacao: null });
     expect(podeAgir(CONEXAO_INICIAL)).toBe(false);
   });
 
   test("cada evento estado troca o snapshot inteiro", () => {
     const primeiro = reduzirConexao(CONEXAO_INICIAL, { tipo: "estado", estado: desconectado });
     const segundo = reduzirConexao(primeiro, { tipo: "estado", estado: conectado });
-    expect(segundo).toEqual({ estado: conectado, canal: "aberto", mudancasDeTarefas: 0, sincronizacao: SINCRONIZACAO_PARADA, rodadasTerminadas: 0 });
+    expect(segundo).toEqual({ estado: conectado, canal: "aberto", mudancasDeTarefas: 0, sincronizacao: SINCRONIZACAO_PARADA, rodadasTerminadas: 0, atualizacao: null });
     expect(podeAgir(segundo)).toBe(true);
   });
 
   test("queda mantém o último snapshot à vista, mas trava as ações", () => {
     const aberta = reduzirConexao(CONEXAO_INICIAL, { tipo: "estado", estado: desconectado });
     const caida = reduzirConexao(aberta, { tipo: "caiu" });
-    expect(caida).toEqual({ estado: desconectado, canal: "sem_conexao", mudancasDeTarefas: 0, sincronizacao: SINCRONIZACAO_PARADA, rodadasTerminadas: 0 });
+    expect(caida).toEqual({ estado: desconectado, canal: "sem_conexao", mudancasDeTarefas: 0, sincronizacao: SINCRONIZACAO_PARADA, rodadasTerminadas: 0, atualizacao: null });
     expect(podeAgir(caida)).toBe(false);
   });
 
   test("reabrir libera as ações de novo", () => {
-    const caida = reduzirConexao({ estado: desconectado, canal: "aberto", mudancasDeTarefas: 0, sincronizacao: SINCRONIZACAO_PARADA, rodadasTerminadas: 0 }, { tipo: "caiu" });
+    const caida = reduzirConexao({ estado: desconectado, canal: "aberto", mudancasDeTarefas: 0, sincronizacao: SINCRONIZACAO_PARADA, rodadasTerminadas: 0, atualizacao: null }, { tipo: "caiu" });
     expect(podeAgir(reduzirConexao(caida, { tipo: "aberto" }))).toBe(true);
   });
 
   test("cada event: tarefas conta uma mudança e mantém o snapshot", () => {
     const aberta = reduzirConexao(CONEXAO_INICIAL, { tipo: "estado", estado: conectado });
     const mudou = reduzirConexao(reduzirConexao(aberta, { tipo: "tarefas" }), { tipo: "tarefas" });
-    expect(mudou).toEqual({ estado: conectado, canal: "aberto", mudancasDeTarefas: 2, sincronizacao: SINCRONIZACAO_PARADA, rodadasTerminadas: 0 });
+    expect(mudou).toEqual({ estado: conectado, canal: "aberto", mudancasDeTarefas: 2, sincronizacao: SINCRONIZACAO_PARADA, rodadasTerminadas: 0, atualizacao: null });
     expect(reduzirConexao(mudou, { tipo: "estado", estado: desconectado }).mudancasDeTarefas).toBe(2);
   });
 
@@ -91,6 +91,21 @@ describe("sincronização no SSE", () => {
     for (const texto of ["{", '{"etapa":"terminou"}', '{"id":"r1","etapa":"fonte","fonte":"outra","situacao":"leu"}', '{"id":"r1","etapa":"fonte","fonte":"agenda","situacao":"apagou"}']) {
       expect(lerAndamento(texto)).toBeNull();
     }
+  });
+});
+
+describe("atualização no SSE", () => {
+  const atualizando = { fase: "atualizando", instalada: "0.1.0", para: "0.2.0", passo: "instalando" } as const;
+
+  test("cada passo troca o estado da atualização e mantém o resto", () => {
+    const aberta = reduzirConexao(CONEXAO_INICIAL, { tipo: "estado", estado: conectado });
+    const mudou = reduzirConexao(aberta, { tipo: "atualizacao", estado: atualizando });
+    expect(mudou).toEqual({ ...aberta, atualizacao: atualizando });
+  });
+
+  test("a borda do SSE aceita só uma fase que existe, com a versão instalada", () => {
+    expect(lerEstadoDaAtualizacao(JSON.stringify(atualizando))).toEqual(atualizando);
+    for (const texto of ["{", "null", '{"fase":"outra","instalada":"0.1.0"}', '{"fase":"em_dia"}']) expect(lerEstadoDaAtualizacao(texto)).toBeNull();
   });
 });
 

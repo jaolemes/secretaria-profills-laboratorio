@@ -955,7 +955,7 @@ data: 2026-11-14
 
 ## Pacote da versão e assinatura
 
-Cada versão marcada sai como dois arquivos anexados à release do GitHub: `secretaria-<versão>.tar.gz`, o pacote, e `versao.json`, o manifesto assinado. O código que monta, assina, confere e extrai mora em `nucleo/atualizacao` e usa só o Bun, sem pacote do npm: o passo que assina roda sem `bun install`. `testes/conferencias/release.test.ts` reprova um import de fora nesse módulo. O servidor confere o `versao.json` (seção "Descoberta de versão nova") e, no clique do vendedor, baixa o pacote, confere e extrai (seção "Aplicar a versão nova"). Nada disso aparece no painel nesta versão.
+Cada versão marcada sai como dois arquivos anexados à release do GitHub: `secretaria-<versão>.tar.gz`, o pacote, e `versao.json`, o manifesto assinado. O código que monta, assina, confere e extrai mora em `nucleo/atualizacao` e usa só o Bun, sem pacote do npm: o passo que assina roda sem `bun install`. `testes/conferencias/release.test.ts` reprova um import de fora nesse módulo. O servidor confere o `versao.json` (seção "Descoberta de versão nova") e, no clique do vendedor, baixa o pacote, confere e extrai (seção "Aplicar a versão nova"). O painel mostra o estado e o botão no cartão do pé (seção "A tela da atualização").
 
 ### O `versao.json`
 
@@ -1056,7 +1056,7 @@ Não verificado: o workflow ainda não rodou no GitHub. A montagem, a conferênc
 
 ## Descoberta de versão nova
 
-O servidor confere se há versão nova buscando o `versao.json` em `ENDERECO_DA_ULTIMA_VERSAO`. Quem busca é o servidor, nunca o navegador: a CSP do painel fica como está. Baixar o pacote e chamar o atualizador é da seção "Aplicar a versão nova". Nada disso aparece no painel nesta versão.
+O servidor confere se há versão nova buscando o `versao.json` em `ENDERECO_DA_ULTIMA_VERSAO`. Quem busca é o servidor, nunca o navegador: a CSP do painel fica como está. Baixar o pacote e chamar o atualizador é da seção "Aplicar a versão nova". O que o painel mostra está na seção "A tela da atualização".
 
 ### Quando busca
 
@@ -1065,6 +1065,7 @@ Nenhum temporizador busca. A busca acontece em três momentos:
 | Pedido | Busca |
 |---|---|
 | `GET /api/atualizacao` do painel | quando a última conferência tem 6 horas ou mais, ficou sem resposta, ou nunca houve; senão devolve a guardada |
+| `GET /api/atualizacao?releitura=1` do painel | nunca: é o painel já aberto relendo o bloqueio quando um conector, uma rodada ou um cartão muda |
 | `POST /api/atualizacao/conferir` do painel | sempre: é o "Tentar agora" |
 | `POST /api/atualizacao/conferir` do agente (`bun secretaria atualizacao conferir`) | quando a última busca começou há 30 segundos ou mais; antes disso, `conferir_cedo_demais` (429) com `erro.esperaS` |
 
@@ -1112,7 +1113,7 @@ O agente recebe cada frase de `oQueMuda` citada como dado, com `detalheComoDado`
 
 ## Aplicar a versão nova
 
-`POST /api/atualizacao/aplicar` é o clique do vendedor no botão Atualizar. Só a sessão do painel aplica: o Bearer do agente recebe `so_no_painel`, e o CLI não tem o comando. Como no resto, isso guarda contra erro do agente e não é fronteira (seção "O que é fronteira e o que não é"). O botão chega ao painel na tela da atualização; nesta versão, nada aparece nele.
+`POST /api/atualizacao/aplicar` é o clique do vendedor no botão Atualizar. Só a sessão do painel aplica: o Bearer do agente recebe `so_no_painel`, e o CLI não tem o comando. Como no resto, isso guarda contra erro do agente e não é fronteira (seção "O que é fronteira e o que não é"). O botão fica no cartão do pé da lateral (seção "A tela da atualização").
 
 `criarAplicador` (`nucleo/servidor/aplicacao.ts`) é dono do clique. O estado que `GET /api/atualizacao`, o `diagnostico` e o SSE entregam sai de `juntarEstado` (`nucleo/atualizacao/aplicacao.ts`, sem I/O), com três entradas: o `EstadoDaDescoberta`, a `Aplicacao` (a deste processo ou o fim que o atualizador gravou) e a lista do que está ocupado agora.
 
@@ -1147,6 +1148,8 @@ O servidor só para depois de o atualizador tomar a trava e gravar `esperar_banc
 
 Falha antes da parada deixa o servidor no ar, em `falhou`, com o motivo: `sem_internet` (o `versao.json` ou o pacote não chegou), `versao_mudou` (a versão publicada mudou, ou pede outro Bun; dispara uma conferência), `pacote_recusado` (sha256, tamanho ou extração), `dependencias_falharam`, `ficou_ocupada` (algo começou no meio, ou outro processo segurava a trava), `atualizador_nao_comecou` e `falha_interna` (um erro que o código não esperava, ou a sessão da aba que já não vale; o registro leva só o nome dele). Toda falha antes de o atualizador tomar a trava apaga `.atualizacao/nova/` e devolve ao cofre a sessão da última entrada (`soltarReserva`). `falhou` traz `nova` e `bloqueio`: o Tentar de novo é outro clique.
 
+O aviso de `falhou` some de dois jeitos: o vendedor clica em Tentar de novo, e a atualização nova toma o lugar dele, ou uma conferência nova deixa de trazer a versão nova (`em_dia` ou `sem_internet`), e o estado volta a ser o da descoberta. Sem versão para aplicar não há o que tentar de novo. Enquanto a conferência traz a versão nova, o aviso fica até o servidor parar.
+
 O download segue o redirecionamento para qualquer host: o GitHub serve o arquivo de outro host, que já mudou de nome, e o que vale é a assinatura do `versao.json` e o sha256.
 
 ### Depois do restart
@@ -1166,6 +1169,35 @@ O atualizador grava `concluido` só depois de `/api/info` do servidor novo respo
 `testes/servidor/aplicar.test.ts` cobre, contra a release falsa e o palco: `so_no_painel` para o Bearer, sem nada baixado; `sem_versao_nova`; o bloqueio com `.git`, com Bun antigo, com o WhatsApp `pareando`, com um cartão em `gravando` (o CRM falso segura a gravação) e com uma sincronização rodando; com a atualização em curso, `aprovar`, `sincronizar` (do painel e do agente) e o `conectar` do WhatsApp recusados, sem chamada ao CRM, com o cartão em `rascunho` e o WhatsApp `desconectado`, e o mesmo cartão aprovado depois da falha; o pacote que não chega, o adulterado e as dependências que não instalam, e o atualizador que não começa, sem `nova/` depois; dois cliques e uma segunda aba, com um download só e o passo pelo SSE; e a leitura do `andamento.json` depois do restart, dentro e fora dos 10 minutos.
 
 `testes/fluxos/aplicar-atualizacao.test.ts` roda a troca inteira: uma instalação de teste da 0.1.0 nasce do pacote numa pasta temporária, com a pasta de dados do palco e o WhatsApp falso conectado. O `nucleo/cli/main.ts` dela é `testes/falsos/secretaria-de-verdade.ts`, que sobe o servidor de verdade deste repo dizendo a versão do `package.json` da instalação (`OpcoesDoServidor.versaoDoNucleo`, só do teste). A release falsa publica a 0.2.0. O clique no servidor da 0.1.0 baixa, instala, sobe o atualizador real que veio na 0.2.0 e para; o atualizador troca a pasta e sobe o servidor da 0.2.0. A aba que clicou entra no servidor novo e vê `atualizado` com `nucleoMudado: 0`; a outra aba recebe 401. O WhatsApp volta a `conectado` com um pareamento só, o do começo.
+
+## A tela da atualização
+
+A atualização mora no cartão do pé da lateral, o das conexões, em toda tela: é a variante 1 ("No cartão do pé") do protótipo. `vistaDaAtualizacao` (`nucleo/painel/atualizacao.ts`, sem I/O) transforma o `EstadoDaAtualizacao` no que o cartão mostra, com uma entrada por fase. `nucleo/painel/AvisoDaAtualizacao.tsx` desenha o aviso e é dono do estado no painel (`useAtualizacao`).
+
+| `fase` | No cartão, acima de quem usa | Na lista aberta das conexões | Botão |
+|---|---|---|---|
+| `nao_conferida`, `em_dia` | nada | "Secretária 0.1.0 · em dia" (sem a conferência, só a versão) | nenhum |
+| `versao_nova` | "Tem versão nova" | "Secretária 0.1.0 · tem a 0.2.0" e o O que muda | Atualizar, em destaque |
+| `versao_nova` com impedimento | "Tem versão nova" e a `bloqueio.explicacao` | igual | nenhum |
+| `versao_nova` com algo ocupado | "Tem versão nova", o cadeado e a `bloqueio.explicacao` | igual | Atualizar, apagado |
+| `atualizando` | "Atualizando para a 0.2.0", o passo ("Baixando a versão nova", "Instalando a versão nova", "Reiniciando a Secretária") e a barra | "· atualizando" | nenhum |
+| `atualizado` | "Atualizada para a 0.2.0", a linha do agente que já estava aberto e, com `nucleoMudado` maior que zero, quantos arquivos foram trocados com cópia guardada | "· atualizada" | nenhum |
+| `falhou` | "Não deu para atualizar", a `explicacao` e "A Secretária continua na 0.1.0 e funciona normalmente." | "· não deu para atualizar" e o O que muda | Tentar de novo, em destaque |
+| `sem_internet` | "Não deu para ver se tem versão nova" e "Sem internet agora. A Secretária confere de novo quando você abrir o painel." | "· sem internet para conferir" | Tentar agora, com contorno |
+
+O O que muda sai como texto, numa lista: o React escapa a marcação, e nada vira link. Com a lateral recolhida, toda fase com aviso ganha um ícone acima de quem usa, com ponto, e o clique abre a lateral; em `atualizando` o ícone gira, sem ponto. No celular, o botão Menu ganha o ponto em `versao_nova`, `falhou` e `atualizado`, e a gaveta mostra o mesmo cartão. O botão fica apagado também enquanto o pedido anda ou com o SSE caído.
+
+A página carrega lendo `GET /api/atualizacao`, que é a abertura do painel e pode buscar a versão. Depois, relê com `?releitura=1`, que nunca busca, quando o SSE volta, um conector muda de fase, uma rodada começa ou termina, ou uma tarefa ou um cartão muda: o bloqueio depende deles, e o SSE manda `event: atualizacao` só quando a atualização muda de passo. O clique recusado com `atualizacao_bloqueada` traz o estado em `erro.atual`, e o cartão passa a mostrar a explicação.
+
+A página só sabe mostrar a versão em que carregou (`lerNaVolta`). Um estado de outra versão recarrega a página, para o navegador pegar o painel novo. Durante a atualização, ela espera a outra versão dizer `atualizado` antes de recarregar: o atualizador grava o fim só depois de o servidor novo responder. Quando o SSE cai em `atualizando`, o painel não mostra "Sem conexão com a Secretária": a cada 2 s, por até 3 min, ele pergunta `GET /api/info`, que não pede sessão, e, quando o servidor responde, relê a atualização. A mesma versão mostra o estado (a `falhou` da volta, por exemplo). A outra aba, sem a sessão que o servidor novo aceita, recarrega pela versão do `/api/info`. Passados os 3 min, o aviso de sem conexão volta. A queda e a desistência valem só para a atualização em curso (`acompanharAVolta`): quando a fase sai de `atualizando`, as duas zeram, e o Tentar de novo depois de um `falhou` sonda só se o canal cair de novo. A sonda é `sondarAVolta`, com o relógio e os pedidos passados por quem chama.
+
+`POST /api/painel/aberto` responde `atualizacao_em_andamento` (409) durante a atualização. O painel não lê a resposta dele, então nada aparece; a página que recarrega na versão nova faz o pedido de novo.
+
+O cartão do pé guarda uma região `aria-live` sempre montada, e o aviso entra dentro dela: leitor de tela costuma não anunciar uma região que entra no DOM já com o texto.
+
+O painel só tem o tema escuro (`color-scheme: dark` em `nucleo/painel/estilos.css`, sem variante `dark:`), então o aviso sai igual com o sistema em modo claro.
+
+`nucleo/painel/atualizacao.test.ts` cobre a vista de cada fase, `lerNaVolta`, `acompanharAVolta` e `sondarAVolta` com relógio falso. `nucleo/painel/AvisoDaAtualizacao.test.tsx` desenha o cartão, a lateral recolhida e o Menu do celular em cada fase, com o botão apagado pelo bloqueio, os impedimentos sem botão, o O que muda com marcação, que sai como texto, e a região `aria-live` montada antes do aviso. `testes/manual/subir-atualizacao.ts` sobe o servidor de verdade contra a release falsa em cada estado, para ver no navegador.
 
 ## O atualizador
 

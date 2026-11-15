@@ -135,9 +135,7 @@ export function criarDescoberta(deps: {
 export function estadoPara(estado: EstadoDaAtualizacao, chamador: Chamador): EstadoDaAtualizacao {
   if (chamador !== "agente") return estado;
   const citada = (nova: VersaoPublicada): VersaoPublicada => ({ ...nova, oQueMuda: nova.oQueMuda.map((frase) => detalheComoDado(textoExterno(frase))) });
-  if (estado.fase === "versao_nova") return { ...estado, nova: citada(estado.nova) };
-  if (estado.fase === "falhou" && estado.nova !== null) return { ...estado, nova: citada(estado.nova) };
-  return estado;
+  return estado.fase === "versao_nova" || estado.fase === "falhou" ? { ...estado, nova: citada(estado.nova) } : estado;
 }
 
 /** A fase é a do estado inteiro; a hora da última conferência e o impedimento são os da descoberta. */
@@ -173,8 +171,9 @@ export function montarRotasDeAtualizacao(descoberta: Descoberta, aplicador: Apli
       metodo: "GET",
       caminho: "/api/atualizacao",
       quem: ["painel", "agente"],
-      async tratar({ chamador }) {
-        if (chamador === "painel") await descoberta.aoAbrirOPainel();
+      async tratar({ chamador, url }) {
+        // A releitura é o painel já aberto atrás de outro bloqueio: abrir o painel é só o carregamento da página.
+        if (chamador === "painel" && url.searchParams.get("releitura") !== "1") await descoberta.aoAbrirOPainel();
         return respostaJson(ok(estadoPara(aplicador.estado(), chamador)), chamador);
       },
     },

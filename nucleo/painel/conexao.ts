@@ -1,3 +1,4 @@
+import type { EstadoDaAtualizacao } from "../atualizacao";
 import type { AndamentoDaSincronizacao } from "../conectores";
 import { CONECTORES_UNICOS, FONTES_DA_SINCRONIZACAO, type EstadoPainel } from "../dominio";
 import { SINCRONIZACAO_PARADA, reduzirSincronizacao, type EstadoDaSincronizacao } from "./meu-dia";
@@ -18,6 +19,8 @@ export interface Conexao {
   readonly sincronizacao: EstadoDaSincronizacao;
   /** Quantas rodadas terminaram. Quem mostra o CRM recarrega quando o número muda. */
   readonly rodadasTerminadas: number;
+  /** O último `event: atualizacao`. O SSE só o manda quando a atualização muda de passo: o resto vem de `GET /api/atualizacao`. */
+  readonly atualizacao: EstadoDaAtualizacao | null;
 }
 
 export type EventoDaConexao =
@@ -25,9 +28,10 @@ export type EventoDaConexao =
   | { readonly tipo: "estado"; readonly estado: EstadoPainel }
   | { readonly tipo: "tarefas" }
   | { readonly tipo: "sincronizacao"; readonly andamento: AndamentoDaSincronizacao }
+  | { readonly tipo: "atualizacao"; readonly estado: EstadoDaAtualizacao }
   | { readonly tipo: "caiu" };
 
-export const CONEXAO_INICIAL: Conexao = { estado: null, canal: "conectando", mudancasDeTarefas: 0, sincronizacao: SINCRONIZACAO_PARADA, rodadasTerminadas: 0 };
+export const CONEXAO_INICIAL: Conexao = { estado: null, canal: "conectando", mudancasDeTarefas: 0, sincronizacao: SINCRONIZACAO_PARADA, rodadasTerminadas: 0, atualizacao: null };
 
 export function reduzirConexao(atual: Conexao, evento: EventoDaConexao): Conexao {
   switch (evento.tipo) {
@@ -43,6 +47,8 @@ export function reduzirConexao(atual: Conexao, evento: EventoDaConexao): Conexao
         sincronizacao: reduzirSincronizacao(atual.sincronizacao, evento.andamento),
         rodadasTerminadas: atual.rodadasTerminadas + (evento.andamento.etapa === "terminou" ? 1 : 0),
       };
+    case "atualizacao":
+      return { ...atual, atualizacao: evento.estado };
     case "caiu":
       // Com o canal caído, o fim da rodada pode se perder: o botão não fica preso esperando por ele.
       return { ...atual, canal: "sem_conexao", sincronizacao: SINCRONIZACAO_PARADA };
@@ -67,6 +73,25 @@ export function lerAndamento(texto: string): AndamentoDaSincronizacao | null {
   const daFonte = FONTES_DA_SINCRONIZACAO.find((nome) => nome === fonte);
   if (etapa !== "fonte" || daFonte === undefined || typeof situacao !== "string" || !ETAPAS_DA_FONTE.includes(situacao)) return null;
   return { id, etapa, fonte: daFonte, situacao: situacao as "lendo" | "leu" | "falhou" | "pulada" };
+}
+
+const FASES_DA_ATUALIZACAO: readonly string[] = ["nao_conferida", "em_dia", "versao_nova", "sem_internet", "atualizando", "atualizado", "falhou"] satisfies readonly EstadoDaAtualizacao["fase"][];
+
+/** Borda do SSE e da API da atualização: fase que esta versão do painel não conhece vira `null`. O resto da forma é a do servidor. */
+export function lerEstadoDaAtualizacao(texto: string): EstadoDaAtualizacao | null {
+  let valor: unknown;
+  try {
+    valor = JSON.parse(texto);
+  } catch {
+    return null;
+  }
+  return ehEstadoDaAtualizacao(valor) ? valor : null;
+}
+
+export function ehEstadoDaAtualizacao(valor: unknown): valor is EstadoDaAtualizacao {
+  if (typeof valor !== "object" || valor === null) return false;
+  const { fase, instalada } = valor as { fase?: unknown; instalada?: unknown };
+  return typeof fase === "string" && FASES_DA_ATUALIZACAO.includes(fase) && typeof instalada === "string";
 }
 
 /** Botões só valem com o canal aberto: com ele caído, o snapshot mostrado pode estar velho. */

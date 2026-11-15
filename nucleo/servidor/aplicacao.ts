@@ -266,9 +266,8 @@ export function criarAplicador(deps: DependenciasDoAplicador): Aplicador {
     aplicar(cookies) {
       const atual = estado();
       if (atual.fase === "atualizando") return ok(atual);
-      const nova = atual.fase === "versao_nova" || atual.fase === "falhou" ? atual.nova : null;
-      if (nova === null) return falha("sem_versao_nova");
-      const bloqueio = atual.fase === "versao_nova" || atual.fase === "falhou" ? atual.bloqueio : null;
+      if (atual.fase !== "versao_nova" && atual.fase !== "falhou") return falha("sem_versao_nova");
+      const { nova, bloqueio } = atual;
       if (bloqueio !== null) {
         const recusa = falha("atualizacao_bloqueada", bloqueio.explicacao);
         return recusa.ok ? recusa : { ok: false, erro: { ...recusa.erro, atual } };

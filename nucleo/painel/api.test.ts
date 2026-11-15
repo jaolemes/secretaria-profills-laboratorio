@@ -18,6 +18,25 @@ function comResposta(dados: unknown = {}): { readonly buscar: Buscar; readonly c
 
 const corpoDe = (chamada: Chamada | undefined) => JSON.parse(String(chamada?.init.body));
 
+describe("pedidos da atualização", () => {
+  test("abrir lê com busca, a releitura não busca, e conferir e aplicar são POST sem corpo", async () => {
+    const { buscar, chamadas } = comResposta();
+    const api = criarApiDeTarefas(buscar);
+    await api.atualizacao(false);
+    await api.atualizacao(true);
+    await api.conferirAtualizacao();
+    await api.aplicarAtualizacao();
+    await api.info();
+    expect(chamadas.map((c) => [c.init.method, c.url, c.init.body])).toEqual([
+      ["GET", "/api/atualizacao", undefined],
+      ["GET", "/api/atualizacao?releitura=1", undefined],
+      ["POST", "/api/atualizacao/conferir", undefined],
+      ["POST", "/api/atualizacao/aplicar", undefined],
+      ["GET", "/api/info", undefined],
+    ]);
+  });
+});
+
 describe("pedidos das conversas de e-mail", () => {
   const ID = "e-0123456789abcdef";
 

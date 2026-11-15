@@ -31,7 +31,12 @@
  * | POST   | /api/escritas/:id/aprovar   | `{ hash, versao }`                  | `Saida<CartaoVisto>`, no estado final da gravação |
  * | POST   | /api/escritas/:id/tentar_de_novo | `{ hash, versao }`             | como `aprovar`                             |
  * | POST   | /api/escritas/:id/ja_esta_no_crm | `{ hash, versao }`             | `Saida<CartaoVisto>`, `gravado`            |
+ * | GET    | /api/atualizacao            | `?releitura=1` não busca a versão   | `Saida<EstadoDaAtualizacao>`               |
+ * | POST   | /api/atualizacao/conferir   | nenhum                              | `Saida<EstadoDaAtualizacao>`, depois da busca |
+ * | POST   | /api/atualizacao/aplicar    | nenhum                              | `Saida<EstadoDaAtualizacao>`, já `atualizando`; a recusa traz `erro.atual` |
+ * | GET    | /api/info                   |                                     | `Saida<Info>`, também sem sessão           |
  *
+ * O SSE também manda `event: atualizacao` (`EstadoDaAtualizacao`) a cada passo da atualização.
  * O SSE também manda `event: sincronizacao` (`AndamentoDaSincronizacao`), sem dado do CRM.
  * Nas ações de conector, o painel não aplica o `dados` da resposta: o estado novo chega pelo SSE.
  * Nas tarefas, ele usa o `dados`; o `event: tarefas` do SSE só avisa que vale recarregar.
@@ -58,7 +63,8 @@ import {
 import type { Sincronizacao } from "../conectores";
 import type { CartaoVisto } from "../escritas";
 import type { EmailParaOPainel, MensagemParaOPainel } from "../dominio";
-import type { ItemIgnorado, RespostaDaTarefa } from "../servidor";
+import type { EstadoDaAtualizacao } from "../atualizacao";
+import type { Info, ItemIgnorado, RespostaDaTarefa } from "../servidor";
 import type { AlvoDeVinculo, Escolha, RespostaDaEscolha } from "./conversas";
 import type { AlvoDoDia } from "./meu-dia";
 import type { AcaoDaTarefa, CorpoDaAcao as CorpoDaAcaoDaTarefa, CorpoDeCriar, EstadoDaTarefa, MeuDia, Tarefa } from "../tarefas";
@@ -236,6 +242,14 @@ export interface ApiDeTarefas {
   /** Como `aprovar`: grava na hora. */
   tentarDeNovo(id: string, corpo: CorpoDeDecidirEscrita): Promise<Resposta<CartaoVisto>>;
   jaEstaNoCrm(id: string, corpo: CorpoDeDecidirEscrita): Promise<Resposta<CartaoVisto>>;
+  /** Sem `releitura`, é a abertura do painel: o servidor busca a versão se passou das 6 horas. */
+  atualizacao(releitura: boolean): Promise<Resposta<EstadoDaAtualizacao>>;
+  /** O Tentar agora: busca sempre. */
+  conferirAtualizacao(): Promise<Resposta<EstadoDaAtualizacao>>;
+  /** O clique em Atualizar ou em Tentar de novo. */
+  aplicarAtualizacao(): Promise<Resposta<EstadoDaAtualizacao>>;
+  /** A versão que o servidor no ar responde. Sem sessão: serve para ver o servidor voltar depois do restart. */
+  info(): Promise<Resposta<Info>>;
 }
 
 /**
@@ -281,5 +295,9 @@ export function criarApiDeTarefas(buscar: Buscar = (url, init) => fetch(url, ini
     aprovarEscrita: (id, corpo) => pedir(buscar, `${rotaDaEscrita(id)}/aprovar`, corpo),
     tentarDeNovo: (id, corpo) => pedir(buscar, `${rotaDaEscrita(id)}/tentar_de_novo`, corpo),
     jaEstaNoCrm: (id, corpo) => pedir(buscar, `${rotaDaEscrita(id)}/ja_esta_no_crm`, corpo),
+    atualizacao: (releitura) => pedir(buscar, releitura ? "/api/atualizacao?releitura=1" : "/api/atualizacao"),
+    conferirAtualizacao: () => pedir(buscar, "/api/atualizacao/conferir", undefined, "POST"),
+    aplicarAtualizacao: () => pedir(buscar, "/api/atualizacao/aplicar", undefined, "POST"),
+    info: () => pedir(buscar, "/api/info"),
   };
 }

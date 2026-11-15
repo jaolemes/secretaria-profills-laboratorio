@@ -2,6 +2,7 @@ import { LoaderCircle, WifiOff } from "lucide-react";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { MeuDia as DadosDoDia } from "../tarefas";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useAtualizacao } from "./AvisoDaAtualizacao";
 import { Lateral, MenuDoCelular } from "./Navegacao";
 import { useQuemUsa } from "./QuemUsa";
 import { chaveDosConectores, type Conexao } from "./conexao";
@@ -101,6 +102,7 @@ export function App() {
   const lembrada = useListaLembrada(rota);
   const modelo = modeloDoMenu(rota, dia.dados, conexao.estado, lembrada, new Date());
   const quem = useQuemUsa(`${conexao.rodadasTerminadas}:${conexao.estado?.conectores.crm.estado.fase ?? ""}`);
+  const atualizacao = useAtualizacao(conexao);
 
   // Carregar a página é o vendedor abrindo o painel. A reconexão do SSE não conta: ela não é ação dele.
   useEffect(() => {
@@ -118,12 +120,13 @@ export function App() {
   return (
     <TooltipProvider delayDuration={280} skipDelayDuration={300}>
       <div className="min-h-dvh md:flex">
-        <Lateral modelo={modelo} quem={quem.cartao} />
+        <Lateral modelo={modelo} quem={quem.cartao} atualizacao={atualizacao} />
         <div className="min-w-0 flex-1 md:py-2.5 md:pr-2.5">
           <main className="min-h-dvh bg-background md:min-h-[calc(100dvh-20px)] md:rounded-2xl md:border md:shadow-[var(--sombra-do-painel)]">
             <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
-              <MenuDoCelular modelo={modelo} quem={quem.cartao} />
-              <AvisoDeConexao canal={conexao.canal} temEstado={conexao.estado !== null} />
+              <MenuDoCelular modelo={modelo} quem={quem.cartao} atualizacao={atualizacao} />
+              {/* No restart da atualização, a queda do canal é esperada: o cartão do pé já diz Reiniciando. */}
+              {!atualizacao.esperandoAVolta && <AvisoDeConexao canal={conexao.canal} temEstado={conexao.estado !== null} />}
               {rota !== null && <Tela rota={rota} conexao={conexao} dia={dia} />}
             </div>
           </main>

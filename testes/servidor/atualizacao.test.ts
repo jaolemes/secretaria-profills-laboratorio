@@ -104,6 +104,14 @@ describe("descoberta de versão nova", () => {
     expect(r.pedidos()).toBe(2);
   });
 
+  test("a releitura do painel aberto não busca, nem depois de sem_internet", async () => {
+    const { p, r } = await subir();
+    r.responder(503);
+    expect(await abrirOPainel(p)).toMatchObject({ fase: "sem_internet" });
+    expect(await dados(p.painel("/api/atualizacao?releitura=1"))).toMatchObject({ fase: "sem_internet" });
+    expect(r.pedidos()).toBe(1);
+  });
+
   test("403 ou 429 do GitHub: sem_internet, e a abertura só tenta de novo depois das 6 horas", async () => {
     const { p, r } = await subir();
     r.responder(429);

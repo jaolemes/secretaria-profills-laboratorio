@@ -73,6 +73,8 @@ A Secretária confere se há versão nova quando o vendedor abre o painel, no m�
 
 O e-mail é opcional. O onboarding fica completo com o WhatsApp conectado e o CRM conectado ou em `crm_app_nao_liberado`. Ofereça o e-mail uma vez e aceite "agora não" com `email pular`. Conta de e-mail se acha pelo rótulo; adicionar, conectar, desconectar e remover conta são do vendedor, no painel (cartão E-mail, em Conexões). Você não faz isso por ele. O `email testar` do agente tem intervalo de 30 segundos por conta (`testar_cedo_demais`): não o repita em laço.
 
+Se uma atualização da Secretária parou no meio, o `abrir` desfaz sozinho e sobe a versão de antes: a resposta traz `atualizacaoDesfeita`, com `de` e `para`. Avise o vendedor de que a Secretária segue na versão `de` e de que nada dele se perdeu. Com `atualizacao_em_andamento`, a Secretária está se atualizando: espere um minuto e rode `abrir` de novo, sem `parar --forcar` e sem mexer na pasta.
+
 Testes: `bun test` e `bun run tipos`. Antes de publicar: `bun run auditar`.
 
 ## Regras duras

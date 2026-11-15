@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { EstadoDaAtualizacao, VersaoPublicada } from "../atualizacao";
-import { lerNaVolta, vistaDaAtualizacao } from "./atualizacao";
+import { SEM_VOLTA, acompanharAVolta, lerNaVolta, sondarAVolta, vistaDaAtualizacao, type PortasDaSonda } from "./atualizacao";
 
 const NOVA: VersaoPublicada = { versao: "0.2.0", data: "2026-11-20", bunMinimo: "1.4.4", oQueMuda: ["O painel avisa quando tem versão nova da Secretária."] };
 const EM = "2026-11-15T12:00:00.000Z";
@@ -140,5 +140,81 @@ describe("a volta do servidor depois do restart", () => {
 
   test("outra versão sem atualização em curso nesta página: recarrega", () => {
     expect(lerNaVolta("0.1.0", VERSAO_NOVA, { fase: "em_dia", instalada: "0.2.0", conferidaEm: EM })).toBe("recarregar");
+  });
+});
+
+describe("a espera pela volta do servidor", () => {
+  test("o canal cai no meio da atualização: a página passa a esperar a volta", () => {
+    expect(acompanharAVolta(SEM_VOLTA, "atualizando", "sem_conexao")).toEqual({ perdeu: true, desistiu: false });
+    expect(acompanharAVolta(SEM_VOLTA, "atualizando", "aberto")).toBe(SEM_VOLTA);
+    expect(acompanharAVolta(SEM_VOLTA, "versao_nova", "sem_conexao")).toBe(SEM_VOLTA);
+  });
+
+  test("o canal que volta não apaga a queda: a sonda segue até o estado mudar", () => {
+    const perdeu = acompanharAVolta(SEM_VOLTA, "atualizando", "sem_conexao");
+    expect(acompanharAVolta(perdeu, "atualizando", "aberto")).toBe(perdeu);
+  });
+
+  test.each(["falhou", "versao_nova", "atualizado"] as const)("depois de %s, o Tentar de novo começa sem queda e sem desistência", (fase) => {
+    expect(acompanharAVolta({ perdeu: true, desistiu: true }, fase, "aberto")).toBe(SEM_VOLTA);
+    expect(acompanharAVolta(acompanharAVolta({ perdeu: true, desistiu: false }, fase, "aberto"), "atualizando", "aberto")).toEqual({ perdeu: false, desistiu: false });
+  });
+});
+
+describe("a sonda da volta", () => {
+  function portas(respostas: { versao?: (n: number) => string | null; estado?: (n: number) => EstadoDaAtualizacao | null } = {}) {
+    let relogio = 0;
+    let perguntas = 0;
+    let parou = false;
+    const esperas: number[] = [];
+    const recebidos: EstadoDaAtualizacao[] = [];
+    let recargas = 0;
+    const p: PortasDaSonda = {
+      agora: () => relogio,
+      esperar: async (ms) => {
+        esperas.push(ms);
+        relogio += ms;
+      },
+      versaoNoAr: async () => (respostas.versao ?? (() => null))(++perguntas),
+      lerAtualizacao: async () => (respostas.estado ?? (() => null))(perguntas),
+      valendo: () => !parou,
+      receber: (lido) => {
+        recebidos.push(lido);
+        parou = true;
+      },
+      recarregar: () => {
+        recargas++;
+        parou = true;
+      },
+    };
+    return { p, esperas, recebidos, recargas: () => recargas, perguntas: () => perguntas };
+  }
+
+  test("o servidor não volta: pergunta a cada 2 s e desiste em 3 min", async () => {
+    const s = portas();
+    expect(await sondarAVolta("0.1.0", s.p)).toBe("desistiu");
+    expect(s.perguntas()).toBe(90);
+    expect(new Set(s.esperas)).toEqual(new Set([2_000]));
+  });
+
+  test("volta na mesma versão, com a sessão: o estado chega e a sonda para", async () => {
+    const s = portas({ versao: (n) => (n < 3 ? null : "0.1.0"), estado: () => FALHOU });
+    expect(await sondarAVolta("0.1.0", s.p)).toBe("parou");
+    expect(s.perguntas()).toBe(3);
+    expect(s.recebidos).toEqual([FALHOU]);
+    expect(s.recargas()).toBe(0);
+  });
+
+  test("a outra aba, sem sessão no servidor novo: recarrega pela versão do /api/info", async () => {
+    const s = portas({ versao: () => "0.2.0" });
+    expect(await sondarAVolta("0.1.0", s.p)).toBe("parou");
+    expect(s.recargas()).toBe(1);
+    expect(s.recebidos).toEqual([]);
+  });
+
+  test("a mesma versão sem sessão não recarrega: continua perguntando", async () => {
+    const s = portas({ versao: () => "0.1.0" });
+    expect(await sondarAVolta("0.1.0", s.p)).toBe("desistiu");
+    expect(s.recargas()).toBe(0);
   });
 });

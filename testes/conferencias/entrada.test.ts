@@ -39,7 +39,7 @@ describe("scripts de entrada", () => {
    * a versão pedida, anota cada chamada e copia o arquivo que recebeu; o `curl` falso entrega um
    * "instalador" que anota a versão que mandaram instalar e põe um `bun` novo em `$BUN_INSTALL/bin`.
    */
-  async function rodarInstalarSh(versaoNoPath: string | null, versaoEmBunInstall: string | null, argumentos: readonly string[] = []) {
+  async function rodarInstalarSh(versaoNoPath: string | null, versaoEmBunInstall: string | null, argumentos: readonly string[] = [], mktempDoMacos = false) {
     const raiz = mkdtempSync(join(tmpdir(), "secretaria-entrada-"));
     const bin = join(raiz, "bin");
     const bunInstall = join(raiz, "bun-install");
@@ -61,6 +61,15 @@ describe("scripts de entrada", () => {
       `#!/bin/sh\ncat <<'FIM'\necho "$1" > "${join(raiz, "instalou")}"\nmkdir -p "${join(bunInstall, "bin")}"\ncp "${join(raiz, "bun-instalado")}" "${join(bunInstall, "bin", "bun")}"\nFIM\n`,
     );
     executavel(join(bin, "unzip"), "#!/bin/sh\nexit 0\n");
+    if (mktempDoMacos) {
+      // O mktemp do macOS, sem modelo, cria em _CS_DARWIN_USER_TEMP_DIR e ignora o TMPDIR (shell_cmds/mktemp/mktemp.c).
+      const doUsuario = join(raiz, "temporaria-do-usuario");
+      mkdirSync(doUsuario);
+      executavel(
+        join(bin, "mktemp"),
+        `#!/bin/sh\nfor argumento in "$@"; do case "$argumento" in -*) ;; *) exec /usr/bin/mktemp "$@" ;; esac; done\nexec /usr/bin/mktemp -d "${doUsuario}/tmp.XXXXXXXXXX"\n`,
+      );
+    }
     try {
       const processo = Bun.spawn(["/bin/sh", join(REPO, "instalar.sh"), ...argumentos], {
         env: { PATH: `${bin}:/usr/bin:/bin`, HOME: raiz, BUN_INSTALL: bunInstall, TMPDIR: raiz },
@@ -98,6 +107,10 @@ describe("scripts de entrada", () => {
       recebido: embutido,
       sobrou: [],
     });
+  });
+
+  test.skipIf(process.platform === "win32")("instalar.sh cria a pasta temporária no TMPDIR também com o mktemp do macOS", async () => {
+    expect(await rodarInstalarSh(FIXADA, null, [], true)).toEqual({ codigo: 0, stderr: "", instalou: [], chamadas: passos(FIXADA), recebido: embutido, sobrou: [] });
   });
 
   test.skipIf(process.platform === "win32").each([

@@ -1,6 +1,8 @@
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import {
+  baixarPacote,
+  buscarVersao,
   conferirPacote,
   conferirVersaoPublicada,
   extrairPacote,
@@ -8,6 +10,7 @@ import {
   versaoMaior,
   type Aplicacao,
   type EstadoDaAtualizacao,
+  type FonteDasVersoes,
   type Manifesto,
   type MotivoDaFalha,
   type Ocupacao,
@@ -19,11 +22,9 @@ import type { Conectores } from "../conectores";
 import { FASES_DURAVEIS, falha, ok, type Instante, type Resultado } from "../dominio";
 import { destacar, type Supervisor } from "../processos";
 import type { Registro } from "../registro";
-import { buscarVersao, type Descoberta, type FonteDasVersoes } from "./atualizacao";
+import type { Descoberta } from "./atualizacao";
 import type { Sessoes } from "./sessoes";
 
-/** O pacote passa de 2 MB; numa conexão ruim, minutos. */
-const PRAZO_DO_PACOTE_MS = 10 * 60_000;
 const PRAZO_DAS_DEPENDENCIAS_MS = 15 * 60_000;
 /** Quanto o servidor espera o atualizador segurar a trava antes de desistir dele e seguir no ar. */
 const PRAZO_DO_ATUALIZADOR_MS = 15_000;
@@ -76,28 +77,6 @@ async function esperarAte(condicao: () => boolean, prazoMs: number): Promise<boo
     await Bun.sleep(50);
   }
   return true;
-}
-
-/** Lê o pacote até o tamanho que o manifesto diz, mais um byte: o que passa disso já não confere. */
-async function baixarPacote(endereco: URL, bytes: number): Promise<Uint8Array | null> {
-  try {
-    // O redirecionamento segue para qualquer host de propósito: o GitHub já trocou o host dos arquivos, e o que vale é a assinatura e o sha256.
-    const resposta = await fetch(endereco, { signal: AbortSignal.timeout(PRAZO_DO_PACOTE_MS) });
-    if (resposta.status !== 200 || resposta.body === null) {
-      await resposta.body?.cancel();
-      return null;
-    }
-    const partes: Uint8Array[] = [];
-    let total = 0;
-    for await (const parte of resposta.body) {
-      partes.push(parte);
-      total += parte.length;
-      if (total > bytes) break;
-    }
-    return new Uint8Array(Buffer.concat(partes));
-  } catch {
-    return null;
-  }
 }
 
 class FalhaDaAplicacao extends Error {

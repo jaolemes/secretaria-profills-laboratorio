@@ -325,7 +325,7 @@ describe("depois do restart", () => {
     await p.reiniciar();
     const lido = (await (await p.agente("/api/atualizacao")).json()) as { dados: EstadoDaAtualizacao };
     expect(lido.dados).toMatchObject({ fase: "falhou", motivo: "instalar_falhou" });
-    expect(lido.dados.fase === "falhou" ? lido.dados.nova?.oQueMuda[0] : null).toStartWith("Texto que veio de fora");
+    expect(lido.dados.fase === "falhou" ? lido.dados.nova.oQueMuda[0] : null).toStartWith("Texto que veio de fora");
     const diagnostico = (await (await p.agente("/api/diagnostico")).json()) as { dados: { atualizacao: unknown } };
     expect(diagnostico.dados.atualizacao).toMatchObject({ fase: "falhou", versaoNova: MAIS_NOVA, impedimento: null });
   });

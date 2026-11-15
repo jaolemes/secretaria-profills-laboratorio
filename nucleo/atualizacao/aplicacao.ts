@@ -90,8 +90,8 @@ export type EstadoDaAtualizacao =
       readonly motivo: MotivoDaFalha;
       readonly explicacao: string;
       readonly em: Instante;
-      /** A versão que ainda dá para aplicar, para o Tentar de novo. */
-      readonly nova: VersaoPublicada | null;
+      /** A versão que ainda dá para aplicar, para o Tentar de novo. Sem ela, o estado é o da descoberta. */
+      readonly nova: VersaoPublicada;
       readonly bloqueio: Bloqueio | null;
     };
 
@@ -108,8 +108,10 @@ export function juntarEstado(descoberta: EstadoDaDescoberta, aplicacao: Aplicaca
     case "em_curso":
       return { fase: "atualizando", instalada, para: aplicacao.para, passo: aplicacao.passo };
     case "falhou": {
+      // Uma conferência que deixa de trazer a versão nova apaga o aviso: não há o que tentar de novo.
+      if (versaoNova === null) break;
       const { para, motivo, em } = aplicacao;
-      return { fase: "falhou", instalada, para, motivo, explicacao: EXPLICACAO_DA_FALHA[motivo], em, nova: versaoNova?.nova ?? null, bloqueio };
+      return { fase: "falhou", instalada, para, motivo, explicacao: EXPLICACAO_DA_FALHA[motivo], em, nova: versaoNova.nova, bloqueio };
     }
     case "concluida":
       if (versaoNova === null) return { fase: "atualizado", instalada, de: aplicacao.de, nucleoMudado: aplicacao.nucleoMudado, em: aplicacao.em };

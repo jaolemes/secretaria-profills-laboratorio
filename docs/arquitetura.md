@@ -1147,6 +1147,8 @@ O servidor só para depois de o atualizador tomar a trava e gravar `esperar_banc
 
 Falha antes da parada deixa o servidor no ar, em `falhou`, com o motivo: `sem_internet` (o `versao.json` ou o pacote não chegou), `versao_mudou` (a versão publicada mudou, ou pede outro Bun; dispara uma conferência), `pacote_recusado` (sha256, tamanho ou extração), `dependencias_falharam`, `ficou_ocupada` (algo começou no meio, ou outro processo segurava a trava), `atualizador_nao_comecou` e `falha_interna` (um erro que o código não esperava, ou a sessão da aba que já não vale; o registro leva só o nome dele). Toda falha antes de o atualizador tomar a trava apaga `.atualizacao/nova/` e devolve ao cofre a sessão da última entrada (`soltarReserva`). `falhou` traz `nova` e `bloqueio`: o Tentar de novo é outro clique.
 
+O aviso de `falhou` some de dois jeitos: o vendedor clica em Tentar de novo, e a atualização nova toma o lugar dele, ou uma conferência nova deixa de trazer a versão nova (`em_dia` ou `sem_internet`), e o estado volta a ser o da descoberta. Sem versão para aplicar não há o que tentar de novo. Enquanto a conferência traz a versão nova, o aviso fica até o servidor parar.
+
 O download segue o redirecionamento para qualquer host: o GitHub serve o arquivo de outro host, que já mudou de nome, e o que vale é a assinatura do `versao.json` e o sha256.
 
 ### Depois do restart

@@ -135,9 +135,7 @@ export function criarDescoberta(deps: {
 export function estadoPara(estado: EstadoDaAtualizacao, chamador: Chamador): EstadoDaAtualizacao {
   if (chamador !== "agente") return estado;
   const citada = (nova: VersaoPublicada): VersaoPublicada => ({ ...nova, oQueMuda: nova.oQueMuda.map((frase) => detalheComoDado(textoExterno(frase))) });
-  if (estado.fase === "versao_nova") return { ...estado, nova: citada(estado.nova) };
-  if (estado.fase === "falhou" && estado.nova !== null) return { ...estado, nova: citada(estado.nova) };
-  return estado;
+  return estado.fase === "versao_nova" || estado.fase === "falhou" ? { ...estado, nova: citada(estado.nova) } : estado;
 }
 
 /** A fase é a do estado inteiro; a hora da última conferência e o impedimento são os da descoberta. */

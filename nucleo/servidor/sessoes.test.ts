@@ -45,6 +45,33 @@ describe("sessões do painel", () => {
     }
   });
 
+  test("a aba que pede a atualização é a que vale depois do restart, mesmo com outra aberta depois", async () => {
+    const { cofre, apagar } = cofreTemporario();
+    try {
+      const sessoes = await criarSessoes(cofre, () => 1_000_000);
+      const quemAtualiza = await entrar(sessoes);
+      const outra = await entrar(sessoes);
+      expect(await sessoes.guardarParaORestart(quemAtualiza)).toBe(true);
+      const depoisDoRestart = await criarSessoes(cofre, () => 1_000_000);
+      expect([depoisDoRestart.valida(quemAtualiza), depoisDoRestart.valida(outra)]).toEqual([true, false]);
+    } finally {
+      apagar();
+    }
+  });
+
+  test("cookie que não é de uma sessão emitida não é guardado", async () => {
+    const { cofre, apagar } = cofreTemporario();
+    try {
+      const sessoes = await criarSessoes(cofre, () => 1_000_000);
+      const valida = await entrar(sessoes);
+      expect(await sessoes.guardarParaORestart(`${NOME_DO_COOKIE}=${(9e15).toString(36)}.inventada`)).toBe(false);
+      expect(await sessoes.guardarParaORestart(null)).toBe(false);
+      expect((await criarSessoes(cofre, () => 1_000_000)).valida(valida)).toBe(true);
+    } finally {
+      apagar();
+    }
+  });
+
   test("cookie com o vencimento adulterado não vale", async () => {
     const { cofre, apagar } = cofreTemporario();
     try {

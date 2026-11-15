@@ -4,7 +4,7 @@ import type { ErroOperacao } from "../../dominio";
 import type { RespostaDaTarefa } from "../../servidor";
 import type { EstadoDaTarefa, Tarefa } from "../../tarefas";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { criarApiDeTarefas, type Resposta } from "../api";
 import { linkDoCrm, type AcaoDoMotivo } from "../meu-dia";
 import { hashDaRota } from "../rota";

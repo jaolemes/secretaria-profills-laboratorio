@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { AlertaDeErro, Selo } from "../cartoes/Cartao";
 import { CLASSE_DA_GAVETA, Cabecalho, Corpo, ROTULO_DE_SECAO, Rodape } from "../cartoes/GavetaDoEmail";
 import {

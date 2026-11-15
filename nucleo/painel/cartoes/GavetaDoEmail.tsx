@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SheetClose, SheetTitle } from "@/components/ui/sheet";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { criarApiDoEmail, type CorpoDeAdicionarEmail, type PedidoDoEmail } from "../api";
 import { descrever, ordemNoRodape } from "../descrever";
 import {

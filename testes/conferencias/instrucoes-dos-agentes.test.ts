@@ -48,12 +48,19 @@ describe("instruções aos agentes", () => {
     expect(comLatest).toEqual([]);
   });
 
-  // O registro do shadcn entrega componentes com `import { cn } from "cn"`, e o pacote `cn` chega
-  // ao node_modules pelo próprio CLI: o import compila sem aviso. O painel usa o `cn` de @/lib/utils.
-  test("nenhum arquivo do painel importa o pacote cn", () => {
-    const comPacoteCn = [...new Bun.Glob("**/*.{ts,tsx}").scanSync(join(REPO, "nucleo", "painel"))].filter((arquivo) =>
-      /from\s+["']cn(\/[^"']*)?["']/.test(readFileSync(join(REPO, "nucleo", "painel", arquivo), "utf8")),
-    );
-    expect(comPacoteCn).toEqual([]);
+  test("nenhum .md da skill shadcn manda rodar npx nem shadcn@latest", () => {
+    const pasta = join(SKILLS, "shadcn");
+    const arquivos = [...new Bun.Glob("**/*.md").scanSync(pasta)];
+    expect(arquivos.length).toBeGreaterThan(5);
+    const comDownload = arquivos.filter((arquivo) => /shadcn@latest|\bnpx\s+\S/.test(readFileSync(join(pasta, arquivo), "utf8")));
+    expect(comDownload).toEqual([]);
+  });
+
+  // O registro do shadcn entrega componentes com `import { cn } from "cn"`. Sem o `cn` exato no
+  // package.json, o import ainda compila com a cópia que o CLI traz, em outra versão.
+  test("o pacote cn vem travado no package.json, sem clsx nem tailwind-merge", () => {
+    const pacote = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8")) as { dependencies?: Record<string, string> };
+    expect(pacote.dependencies?.cn).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(Object.keys(pacote.dependencies ?? {}).filter((nome) => nome === "clsx" || nome === "tailwind-merge")).toEqual([]);
   });
 });

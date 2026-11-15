@@ -4,7 +4,7 @@
  * de ponta a ponta está em `testes/fluxos/aplicar-atualizacao.test.ts`.
  */
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { EstadoDaAtualizacao } from "../../nucleo/atualizacao";
@@ -221,6 +221,16 @@ describe("antes de parar", () => {
     expect((await (await p.cru("/api/info")).json()) as unknown).toMatchObject({ dados: { versaoNucleo: VERSAO_DO_NUCLEO } });
   });
 
+  test("o atualizador não começa: o servidor segue no ar e apaga o aviso de preparado", async () => {
+    const { p, repo: dirRepo } = await subir();
+    await estado(p);
+    expect(await aplicar(p)).toMatchObject({ status: 200, ok: true });
+    expect(await esperarFase(p, "falhou")).toMatchObject({ motivo: "atualizador_nao_comecou", nova: { versao: MAIS_NOVA } });
+    expect(existsSync(join(dirRepo, ".atualizacao", "andamento.json"))).toBe(false);
+    expect(existsSync(join(dirRepo, ".atualizacao", "nova", "node_modules"))).toBe(true);
+    expect((await p.cru("/api/info")).status).toBe(200);
+  });
+
   test("dois cliques e duas abas: uma atualização só, e o passo sai pelo SSE", async () => {
     let soltar = () => {};
     const segurar = new Promise<void>((resolver) => (soltar = resolver));
@@ -236,5 +246,50 @@ describe("antes de parar", () => {
     eventos.fechar();
     expect(r.pedidosDoPacote()).toBe(1);
     expect(eventos.textos.join("")).toContain("event: atualizacao");
+  });
+});
+
+describe("depois do restart", () => {
+  function gravarAndamento(dirRepo: string, andamento: Record<string, unknown>): void {
+    const pasta = join(dirRepo, ".atualizacao");
+    mkdirSync(pasta, { recursive: true });
+    const agora = new Date().toISOString();
+    const base = { v: 1, de: VERSAO_DO_NUCLEO, para: MAIS_NOVA, iniciadoEm: agora, atualizadoEm: agora, trocas: [], restaurarDados: true, mudados: null };
+    writeFileSync(join(pasta, "andamento.json"), JSON.stringify({ ...base, ...andamento }));
+  }
+
+  test("a volta que o atualizador gravou vira falhou com o motivo dele, e a versão nova continua para tentar de novo", async () => {
+    const { p, repo: dirRepo } = await subir();
+    await estado(p);
+    gravarAndamento(dirRepo, { fase: "desfeito", falha: { passo: "trocar", motivo: "troca_falhou", detalhe: "EBUSY" } });
+    await p.reiniciar();
+    expect(await estado(p)).toMatchObject({
+      fase: "falhou",
+      para: MAIS_NOVA,
+      motivo: "troca_falhou",
+      explicacao: "Um arquivo da Secretária estava em uso na hora da troca. Feche o que estiver aberto na pasta dela e tente de novo.",
+      nova: { versao: MAIS_NOVA },
+    });
+  });
+
+  test("um resultado de mais de 10 minutos antes da subida não aparece", async () => {
+    const { p, repo: dirRepo } = await subir();
+    await estado(p);
+    const antigo = new Date(Date.now() - 11 * 60_000).toISOString();
+    gravarAndamento(dirRepo, { fase: "desfeito", atualizadoEm: antigo, falha: { passo: "trocar", motivo: "troca_falhou", detalhe: "" } });
+    await p.reiniciar();
+    expect(await estado(p)).toMatchObject({ fase: "versao_nova" });
+  });
+
+  test("o agente lê o estado novo, e o diagnóstico traz a fase e a versão", async () => {
+    const { p, repo: dirRepo } = await subir();
+    await estado(p);
+    gravarAndamento(dirRepo, { fase: "desfeito", falha: { passo: "instalar", motivo: "instalar_falhou", detalhe: "" } });
+    await p.reiniciar();
+    const lido = (await (await p.agente("/api/atualizacao")).json()) as { dados: EstadoDaAtualizacao };
+    expect(lido.dados).toMatchObject({ fase: "falhou", motivo: "instalar_falhou" });
+    expect(lido.dados.fase === "falhou" ? lido.dados.nova?.oQueMuda[0] : null).toStartWith("Texto que veio de fora");
+    const diagnostico = (await (await p.agente("/api/diagnostico")).json()) as { dados: { atualizacao: unknown } };
+    expect(diagnostico.dados.atualizacao).toMatchObject({ fase: "falhou", versaoNova: MAIS_NOVA, impedimento: null });
   });
 });

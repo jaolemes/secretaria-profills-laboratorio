@@ -1141,7 +1141,7 @@ O clique responde na hora com `atualizando`, `passo: "baixando"`. O estado muda 
 
 O servidor só para depois de o atualizador tomar a trava e gravar `esperar_banco`. Se o andamento segue em `preparado` e a trava está livre, o atualizador não começou: o servidor apaga o `andamento.json`, fica no ar e entra em `falhou` com `atualizador_nao_comecou`.
 
-Falha antes da parada deixa o servidor no ar, em `falhou`, com o motivo: `sem_internet` (o `versao.json` ou o pacote não chegou), `versao_mudou` (a versão publicada mudou, ou pede outro Bun; dispara uma conferência), `pacote_recusado` (sha256, tamanho ou extração), `dependencias_falharam`, `ficou_ocupada` (algo começou no meio, ou outro processo segurava a trava) e `atualizador_nao_comecou`. `falhou` traz `nova` e `bloqueio`: o Tentar de novo é outro clique.
+Falha antes da parada deixa o servidor no ar, em `falhou`, com o motivo: `sem_internet` (o `versao.json` ou o pacote não chegou), `versao_mudou` (a versão publicada mudou, ou pede outro Bun; dispara uma conferência), `pacote_recusado` (sha256, tamanho ou extração), `dependencias_falharam`, `ficou_ocupada` (algo começou no meio, ou outro processo segurava a trava), `atualizador_nao_comecou` e `falha_interna` (um erro que o código não esperava; o registro leva só o nome dele). `falhou` traz `nova` e `bloqueio`: o Tentar de novo é outro clique.
 
 ### Depois do restart
 

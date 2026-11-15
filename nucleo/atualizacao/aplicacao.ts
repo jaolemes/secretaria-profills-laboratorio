@@ -6,7 +6,7 @@ type Instante = string;
 export type PassoDaAplicacao = "baixando" | "instalando" | "reiniciando";
 
 /**
- * Por que a atualização não foi feita. Os seis primeiros são do servidor, antes de parar; os outros
+ * Por que a atualização não foi feita. Os sete primeiros são do servidor, antes de parar; os outros
  * são os do atualizador, lidos do `andamento.json` pelo servidor que sobe depois.
  */
 export const MOTIVOS_DA_FALHA = [
@@ -16,6 +16,7 @@ export const MOTIVOS_DA_FALHA = [
   "dependencias_falharam",
   "ficou_ocupada",
   "atualizador_nao_comecou",
+  "falha_interna",
   "banco_em_uso",
   "versao_nova_invalida",
   "copia_falhou",
@@ -54,6 +55,7 @@ export const EXPLICACAO_DA_FALHA: { readonly [M in MotivoDaFalha]: string } = {
   dependencias_falharam: "Não deu para preparar a versão nova. Confira a internet e tente de novo.",
   ficou_ocupada: "Algo começou na Secretária durante o download. Tente de novo quando terminar.",
   atualizador_nao_comecou: "A troca de versão não começou. Tente de novo.",
+  falha_interna: "Algo falhou dentro da Secretária. Tente de novo e, se continuar, peça ajuda ao seu agente.",
   banco_em_uso: "Outro programa estava usando os dados da Secretária. Feche o que estiver aberto e tente de novo.",
   versao_nova_invalida: "A versão nova veio incompleta.",
   copia_falhou: "Não deu para guardar a cópia dos seus dados antes da troca. Confira se o disco tem espaço livre.",

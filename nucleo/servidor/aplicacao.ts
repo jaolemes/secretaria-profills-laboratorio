@@ -184,7 +184,8 @@ export function criarAplicador(deps: DependenciasDoAplicador): Aplicador {
    * e saiu de `preparado`: antes disso, uma parada deixaria a Secretária fora do ar sem ninguém para subi-la.
    */
   async function entregarAoAtualizador(para: string): Promise<void> {
-    if (ocupacoes().length > 0) throw new FalhaDaAplicacao("ficou_ocupada", ocupacoes().join(", "));
+    const ocupada = ocupacoes();
+    if (ocupada.length > 0) throw new FalhaDaAplicacao("ficou_ocupada", ocupada.join(", "));
     const trava = segurarTrava(caminhos.trava);
     if (trava === null) throw new FalhaDaAplicacao("ficou_ocupada", "outro processo segura a trava da atualização");
     try {
@@ -228,8 +229,9 @@ export function criarAplicador(deps: DependenciasDoAplicador): Aplicador {
       passo("reiniciando");
       await entregarAoAtualizador(para);
     } catch (erro) {
-      const motivo = erro instanceof FalhaDaAplicacao ? erro.motivo : "atualizador_nao_comecou";
-      deps.registro.aviso("atualizacao.falhou", { motivo, erro: erro instanceof Error ? erro.message.slice(0, 500) : typeof erro });
+      const motivo = erro instanceof FalhaDaAplicacao ? erro.motivo : "falha_interna";
+      // O detalhe da falha nossa vai ao registro; do erro inesperado, só o nome, como no resto do servidor.
+      deps.registro.aviso("atualizacao.falhou", { motivo, detalhe: erro instanceof FalhaDaAplicacao ? erro.message.slice(0, 500) : erro instanceof Error ? erro.name : typeof erro });
       if (motivo === "versao_mudou") void deps.descoberta.conferir();
       mudar({ tipo: "falhou", para, motivo, em: deps.agora() });
     }

@@ -1129,19 +1129,25 @@ Em `versao_nova` e em `falhou`, `bloqueio` diz por que agora não dá, com `moti
 
 Com bloqueio, o clique responde `atualizacao_bloqueada` (409) com o estado em `erro.atual`. Sem versão nova, `sem_versao_nova` (409). Com o `andamento.json` de uma atualização que não chegou ao fim, `atualizacao_em_andamento` (409).
 
+### O que espera a atualização
+
+Do clique até a parada, ou até `falhou`, nada que se perderia num restart começa. `recusaDuranteAAtualizacao` do aplicador responde `atualizacao_em_andamento` (409) a `aprovar` e `tentar_de_novo` de um cartão, a `POST /api/sincronizar`, a `POST /api/painel/aberto`, ao `conectar` e ao `testar` do WhatsApp, do CRM e das contas de e-mail, a adicionar conta e a `/oauth/crm/iniciar`. Quem pede confere na mesma volta em que começa, sem `await` no meio: para o cartão, dentro da fila das gravações, antes de ele ir a `gravando`. Sem isso, o que começasse depois da última conferência das ocupações, no passo `reiniciando`, seria cortado pela parada: o cartão ficaria `falhou_incerto` e o pareamento se perderia. A sincronização automática por conexão só nasce de um `conectar`, então também espera.
+
 ### Os passos no servidor
 
 O clique responde na hora com `atualizando`, `passo: "baixando"`. O estado muda antes da primeira espera: o segundo clique, ou o de outra aba, recebe o mesmo `atualizando` e não começa outra. Cada mudança de passo sai pelo SSE como `event: atualizacao`, com o estado inteiro; o agente recebe o O que muda citado como dado.
 
 | `passo` | O que o servidor faz |
 |---|---|
-| `baixando` | guarda a sessão da aba que clicou como a que o servidor seguinte aceita (`guardarParaORestart`); busca o `versao.json` de novo e confere a assinatura, que a versão é a mesma que o vendedor viu e o Bun mínimo; baixa o pacote da URL do manifesto, até o tamanho dele, em até 10 min; confere tamanho e sha256 (`conferirPacote`); apaga `.atualizacao/nova/` e só então extrai nela (`extrairPacote`) |
+| `baixando` | guarda a sessão da aba que clicou como a que o servidor seguinte aceita (`guardarParaORestart`); uma entrada por bilhete depois do clique vale neste servidor, mas não toma o lugar dela no cofre; busca o `versao.json` de novo e confere a assinatura, que a versão é a mesma que o vendedor viu e o Bun mínimo; baixa o pacote da URL do manifesto, até o tamanho dele, em até 10 min; confere tamanho e sha256 (`conferirPacote`); apaga `.atualizacao/nova/` e só então extrai nela (`extrairPacote`) |
 | `instalando` | `bun install --frozen-lockfile --cwd .atualizacao/nova` pelo supervisor, em até 15 min: toda a rede das dependências acontece com o servidor no ar |
 | `reiniciando` | confere de novo o que está ocupado; com a `trava.db` na mão, confere que não há atualização pendente e grava o `andamento.json` em `preparado`; solta a trava; sobe destacado `bun .atualizacao/nova/nucleo/atualizador/main.ts --repo <raiz> --dados <pasta de dados>`, com a saída em `<dados>/logs/atualizador.log`; espera o andamento sair de `preparado`, até 15 s; e pede a própria parada |
 
 O servidor só para depois de o atualizador tomar a trava e gravar `esperar_banco`. Se o andamento segue em `preparado` e a trava está livre, o atualizador não começou: o servidor apaga o `andamento.json`, fica no ar e entra em `falhou` com `atualizador_nao_comecou`.
 
-Falha antes da parada deixa o servidor no ar, em `falhou`, com o motivo: `sem_internet` (o `versao.json` ou o pacote não chegou), `versao_mudou` (a versão publicada mudou, ou pede outro Bun; dispara uma conferência), `pacote_recusado` (sha256, tamanho ou extração), `dependencias_falharam`, `ficou_ocupada` (algo começou no meio, ou outro processo segurava a trava), `atualizador_nao_comecou` e `falha_interna` (um erro que o código não esperava; o registro leva só o nome dele). `falhou` traz `nova` e `bloqueio`: o Tentar de novo é outro clique.
+Falha antes da parada deixa o servidor no ar, em `falhou`, com o motivo: `sem_internet` (o `versao.json` ou o pacote não chegou), `versao_mudou` (a versão publicada mudou, ou pede outro Bun; dispara uma conferência), `pacote_recusado` (sha256, tamanho ou extração), `dependencias_falharam`, `ficou_ocupada` (algo começou no meio, ou outro processo segurava a trava), `atualizador_nao_comecou` e `falha_interna` (um erro que o código não esperava, ou a sessão da aba que já não vale; o registro leva só o nome dele). Toda falha antes de o atualizador tomar a trava apaga `.atualizacao/nova/` e devolve ao cofre a sessão da última entrada (`soltarReserva`). `falhou` traz `nova` e `bloqueio`: o Tentar de novo é outro clique.
+
+O download segue o redirecionamento para qualquer host: o GitHub serve o arquivo de outro host, que já mudou de nome, e o que vale é a assinatura do `versao.json` e o sha256.
 
 ### Depois do restart
 
@@ -1157,7 +1163,7 @@ O atualizador grava `concluido` só depois de `/api/info` do servidor novo respo
 
 ### Teste
 
-`testes/servidor/aplicar.test.ts` cobre, contra a release falsa e o palco: `so_no_painel` para o Bearer, sem nada baixado; `sem_versao_nova`; o bloqueio com `.git`, com Bun antigo, com o WhatsApp `pareando`, com um cartão em `gravando` (o CRM falso segura a gravação) e com uma sincronização rodando; o pacote que não chega, o adulterado (nada extraído) e as dependências que não instalam; o atualizador que não começa; dois cliques e uma segunda aba, com um download só e o passo pelo SSE; e a leitura do `andamento.json` depois do restart, dentro e fora dos 10 minutos.
+`testes/servidor/aplicar.test.ts` cobre, contra a release falsa e o palco: `so_no_painel` para o Bearer, sem nada baixado; `sem_versao_nova`; o bloqueio com `.git`, com Bun antigo, com o WhatsApp `pareando`, com um cartão em `gravando` (o CRM falso segura a gravação) e com uma sincronização rodando; com a atualização em curso, `aprovar`, `sincronizar` (do painel e do agente) e o `conectar` do WhatsApp recusados, sem chamada ao CRM, com o cartão em `rascunho` e o WhatsApp `desconectado`, e o mesmo cartão aprovado depois da falha; o pacote que não chega, o adulterado e as dependências que não instalam, e o atualizador que não começa, sem `nova/` depois; dois cliques e uma segunda aba, com um download só e o passo pelo SSE; e a leitura do `andamento.json` depois do restart, dentro e fora dos 10 minutos.
 
 `testes/fluxos/aplicar-atualizacao.test.ts` roda a troca inteira: uma instalação de teste da 0.1.0 nasce do pacote numa pasta temporária, com a pasta de dados do palco e o WhatsApp falso conectado. O `nucleo/cli/main.ts` dela é `testes/falsos/secretaria-de-verdade.ts`, que sobe o servidor de verdade deste repo dizendo a versão do `package.json` da instalação (`OpcoesDoServidor.versaoDoNucleo`, só do teste). A release falsa publica a 0.2.0. O clique no servidor da 0.1.0 baixa, instala, sobe o atualizador real que veio na 0.2.0 e para; o atualizador troca a pasta e sobe o servidor da 0.2.0. A aba que clicou entra no servidor novo e vê `atualizado` com `nucleoMudado: 0`; a outra aba recebe 401. O WhatsApp volta a `conectado` com um pareamento só, o do começo.
 

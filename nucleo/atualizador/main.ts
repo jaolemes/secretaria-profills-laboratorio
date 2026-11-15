@@ -48,11 +48,39 @@ export interface Troca {
  * O `instalar` ou o servidor que o atualizador subiu e que pode seguir vivo depois de ele morrer.
  * `inicio` é a hora de início que o sistema dá ao pid, em texto opaco: o sistema reaproveita o pid,
  * e só os dois juntos dizem que o processo é o mesmo. `null`: a hora ainda não foi lida, ou não deu.
+ * Sem ela, a volta confere se o processo do pid nasceu durante a atualização: ver `estadoDoProcesso`.
  */
 export interface ProcessoDaAtualizacao {
   readonly papel: "instalar" | "servidor";
   readonly pid: number;
   readonly inicio: string | null;
+}
+
+/** O que a volta sabe do pid anotado. Só `nosso` é encerrado. */
+export type EstadoDoProcesso = "nosso" | "nenhum" | "incerto";
+
+/** Erro de relógio entre a hora que o sistema dá ao processo e a que o andamento gravou: o `btime` do Linux e o `lstart` do macOS vêm em segundos inteiros. */
+const FOLGA_DO_NASCIMENTO_MS = 2_000;
+const MESES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** A hora de início de `inicioDoProcesso`, em milissegundos de relógio. `null`: o texto não está no formato do sistema. */
+export function msDoInicio(inicio: string, plataforma: NodeJS.Platform): number | null {
+  if (plataforma === "win32") return /^\d+$/.test(inicio) ? Number((BigInt(inicio) - 621_355_968_000_000_000n) / 10_000n) : null;
+  if (plataforma === "linux") {
+    if (!/^\d+$/.test(inicio)) return null;
+    try {
+      const boot = /^btime (\d+)$/m.exec(readFileSync("/proc/stat", "utf8"))?.[1];
+      // O starttime conta em tiques de 1/100 s desde o boot: o USER_HZ do Linux é 100 nos processadores de mesa.
+      return boot === undefined ? null : Number(boot) * 1_000 + Number(inicio) * 10;
+    } catch {
+      return null;
+    }
+  }
+  const partes = /^\w{3} (\w{3}) +(\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/.exec(inicio);
+  const mes = MESES.indexOf(partes?.[1] ?? "");
+  if (partes === null || mes === -1) return null;
+  const [dia, hora, minuto, segundo, ano] = partes.slice(2).map(Number) as [number, number, number, number, number];
+  return new Date(ano, mes, dia, hora, minuto, segundo).getTime();
 }
 
 /** `<repo>/.atualizacao/andamento.json`. Gravado por arquivo temporário e rename, a cada mudança de fase. */
@@ -115,8 +143,8 @@ export interface Efeitos {
   subirServidor(raizDoRepo: string, dirDados: string): ServidorSubindo;
   /** A hora de início do processo, como o sistema a registra. `null`: ele não existe, ou o sistema não deixou ler. */
   inicioDoProcesso(pid: number): string | null;
-  /** O processo que nasceu com este pid e esta hora segue vivo? Hora que não dá para ler conta como a mesma. */
-  processoVivo(pid: number, inicio: string | null): boolean;
+  /** Há um processo com este pid, de qualquer dono. Não diz se é o que o atualizador subiu. */
+  existe(pid: number): boolean;
   /** Encerra à força o processo e os que ele subiu. Verdadeiro quando o processo não existe mais. */
   encerrarArvore(pid: number): Promise<boolean>;
   /** A versão que o servidor de pid `pid` responde em `/api/info`, ou `null` enquanto ele não responde. */
@@ -452,6 +480,26 @@ function operacoes(raizDoRepo: string, dirDados: string, prazos: Prazos, efeitos
     return movidas;
   }
 
+  /**
+   * Quem tem hoje o pid anotado. `nosso`: o mesmo processo, pela hora de início anotada ou, sem ela,
+   * por ter nascido entre o começo da atualização e a última gravação do andamento. `incerto`: o pid
+   * existe e não há como confirmar. Passado o prazo do papel, o incerto conta como `nenhum`: o
+   * atualizador não deixaria o processo dele viver tanto.
+   */
+  function estadoDoProcesso(processo: ProcessoDaAtualizacao | null, andamento: Andamento): EstadoDoProcesso {
+    if (processo === null || !efeitos.existe(processo.pid)) return "nenhum";
+    const agora = efeitos.inicioDoProcesso(processo.pid);
+    if (agora !== null && processo.inicio !== null) return agora === processo.inicio ? "nosso" : "nenhum";
+    const nasceu = agora === null ? null : msDoInicio(agora, efeitos.plataforma);
+    if (nasceu !== null) {
+      const [desde, ate] = [Date.parse(andamento.iniciadoEm), Date.parse(andamento.atualizadoEm)];
+      return nasceu >= desde - FOLGA_DO_NASCIMENTO_MS && nasceu <= ate + FOLGA_DO_NASCIMENTO_MS ? "nosso" : "nenhum";
+    }
+    if (!efeitos.existe(processo.pid)) return "nenhum";
+    const prazo = processo.papel === "instalar" ? prazos.instalarMs : prazos.servidorMs;
+    return Date.now() <= Date.parse(andamento.atualizadoEm) + prazo ? "incerto" : "nenhum";
+  }
+
   const BANCOS = ["secretaria.db", "meu.db"];
   const SUFIXOS = ["", "-wal", "-shm"];
 
@@ -461,14 +509,18 @@ function operacoes(raizDoRepo: string, dirDados: string, prazos: Prazos, efeitos
     /** Os dois bancos, o do núcleo e o do vendedor, porque a volta devolve as cópias dos dois. */
     bancosLivres: () => efeitos.bancoLivre(caminhos.banco) && efeitos.bancoLivre(caminhos.bancoDoVendedor),
 
-    processoVivo: (processo: ProcessoDaAtualizacao | null) => processo !== null && efeitos.processoVivo(processo.pid, processo.inicio),
+    estadoDoProcesso,
 
     /**
      * A volta renomeia pastas e devolve os bancos: antes dela, o `instalar` ou o servidor que ficou
-     * vivo é encerrado, com os processos que subiu. Falso quando ele não encerrou.
+     * vivo é encerrado, com os processos que subiu. Processo incerto não é encerrado: o pid pode ser
+     * de outro programa. `preso`: era o nosso e não encerrou.
      */
-    async semProcesso(processo: ProcessoDaAtualizacao | null): Promise<boolean> {
-      return processo === null || !efeitos.processoVivo(processo.pid, processo.inicio) || (await efeitos.encerrarArvore(processo.pid));
+    async semProcesso(processo: ProcessoDaAtualizacao | null, andamento: Andamento): Promise<"livre" | "incerto" | "preso"> {
+      const estado = estadoDoProcesso(processo, andamento);
+      if (estado === "nenhum" || processo === null) return "livre";
+      if (estado === "incerto") return "incerto";
+      return (await efeitos.encerrarArvore(processo.pid)) ? "livre" : "preso";
     },
 
     /** Confere a versão nova, monta o plano e conta o que o agente do vendedor mudou no núcleo. Não muda nada além de limpar `anterior/`. */
@@ -669,6 +721,8 @@ export async function atualizar(
     }
 
     let passo: Passo = "preparar";
+    /** Pelo processo que este atualizador subiu e ainda segura, não pelo pid: enquanto ele não sai, o sistema não dá o pid a outro. */
+    let filhoSaiu = () => true;
     try {
       gravar({ fase: passo });
       const plano = ops.preparar();
@@ -680,12 +734,16 @@ export async function atualizar(
       await ops.trocarTudo(andamento.trocas);
       gravar({ fase: (passo = "instalar"), restaurarDados: true });
       const instalando = efeitos.iniciarInstalar(raizDoRepo, dirDados);
+      let instalarSaiu = false;
+      void instalando.fim.then(() => (instalarSaiu = true));
+      filhoSaiu = () => instalarSaiu;
       registrar("instalar", instalando.pid);
       const instalado = await comPrazo(instalando.fim, prazos.instalarMs);
       if (instalado === null) throw new Falha("instalar_falhou", `o instalar não terminou em ${Math.round(prazos.instalarMs / 1000)} s`);
       if (!instalado.ok) throw new Falha("instalar_falhou", instalado.detalhe);
       gravar({ fase: (passo = "subir"), processo: null });
       const servidor = efeitos.subirServidor(raizDoRepo, dirDados);
+      filhoSaiu = servidor.saiu;
       registrar("servidor", servidor.pid);
       if (!(await ops.servidorResponde(servidor, versao))) {
         await servidor.encerrar();
@@ -693,10 +751,13 @@ export async function atualizar(
       }
       gravar({ fase: "concluido", processo: null });
     } catch (erro) {
-      gravar({ fase: "desfazer", falha: falhaEm(passo, erro) });
+      const vivo = filhoSaiu() ? null : andamento.processo;
+      gravar({ fase: "desfazer", falha: falhaEm(passo, erro), processo: vivo });
       try {
-        if (!(await ops.semProcesso(andamento.processo))) throw new Error(`o processo ${andamento.processo?.pid} da atualização não encerrou`);
-        if (andamento.processo !== null) gravar({ processo: null });
+        if (vivo !== null) {
+          if (!(await efeitos.encerrarArvore(vivo.pid))) throw new Error(`o processo ${vivo.pid} da atualização não encerrou`);
+          gravar({ processo: null });
+        }
         if (!(await esperarAte(ops.bancosLivres, prazos.bancoMs, prazos.intervaloMs))) throw new Error("o banco seguiu em uso");
         await ops.desfazer(andamento);
       } catch (naVolta) {
@@ -722,7 +783,7 @@ export async function atualizar(
 
 export type Recuperacao =
   | { readonly tipo: "nada" }
-  /** Um atualizador vivo segura a trava. */
+  /** Um atualizador vivo segura a trava, ou o pid anotado existe e não deu para confirmar que é o processo que ele subiu: ninguém o encerra. */
   | { readonly tipo: "em_andamento" }
   /** O servidor da versão nova responde, agora ou depois de a volta esperar por ele: só faltava gravar o fim. */
   | { readonly tipo: "concluida"; readonly de: string | null; readonly para: string | null }
@@ -789,12 +850,13 @@ export async function recuperar(
       }
       return { tipo: "servidor_no_meio", versaoNoAr: opcoes.versaoNoAr };
     }
-    if (processo !== null && processo.papel === "servidor" && andamento.fase === "subir" && ops.processoVivo(processo)) {
+    if (processo !== null && processo.papel === "servidor" && andamento.fase === "subir" && ops.estadoDoProcesso(processo, andamento) !== "nenhum") {
       // O servidor que o atualizador subiu ainda está nascendo: desfazer agora tiraria a pasta de baixo dele.
       let respondeu = false;
       await esperarAte(
         async () => {
-          if (!ops.processoVivo(processo)) return true;
+          // Quem ele é já foi visto: a cada volta basta o pid existir, sem abrir um powershell por volta no Windows.
+          if (!efeitos.existe(processo.pid)) return true;
           respondeu = (await efeitos.versaoNoAr(dirDados, processo.pid)) === para;
           return respondeu;
         },
@@ -806,7 +868,9 @@ export async function recuperar(
         return { tipo: "concluida", de, para };
       }
     }
-    if (processo !== null && !(await ops.semProcesso(processo))) return { tipo: "processo_preso", papel: processo.papel, pid: processo.pid };
+    const semProcesso = await ops.semProcesso(processo, andamento);
+    if (semProcesso === "incerto") return { tipo: "em_andamento" };
+    if (semProcesso === "preso" && processo !== null) return { tipo: "processo_preso", papel: processo.papel, pid: processo.pid };
     if (!(await esperarAte(ops.bancosLivres, prazos.soltarBancoMs, prazos.intervaloMs))) return { tipo: "banco_em_uso" };
     if (andamento.fase !== "desfazer" || processo !== null) gravar({ fase: "desfazer", falha, processo: null });
     await ops.desfazer(andamento);
@@ -821,7 +885,8 @@ export async function recuperar(
 
 /**
  * `recomposta`: alguma entrada voltou de lugar. `nada`: a pasta já estava inteira. `em_andamento`:
- * um atualizador vivo segura a trava, ou o processo que ele subiu segue vivo, e nada foi movido.
+ * um atualizador vivo segura a trava, ou o processo que ele subiu segue vivo ou não deu para
+ * descartar, e nada foi movido.
  */
 export type Recomposicao = { readonly tipo: "nada" } | { readonly tipo: "em_andamento" } | { readonly tipo: "recomposta" } | { readonly tipo: "falhou"; readonly detalhe: string };
 
@@ -846,8 +911,8 @@ export async function recomporArvore(raizDoRepo: string, efeitos: Efeitos = efei
     const andamento = rasgada();
     if (andamento === null) return { tipo: "nada" };
     // Com o processo ainda anotado, a volta não moveu nada: a pasta está inteira, e encerrá-lo é do `recuperar`.
-    if (ops.processoVivo(andamento.processo)) return { tipo: "em_andamento" };
-    if (andamento.fase !== "desfazer") regravar(caminhos.andamento, andamento, { fase: "desfazer", falha: falhaDaQueda(andamento) }, efeitos);
+    if (ops.estadoDoProcesso(andamento.processo, andamento) !== "nenhum") return { tipo: "em_andamento" };
+    if (andamento.fase !== "desfazer") regravar(caminhos.andamento, andamento, { fase: "desfazer", falha: falhaDaQueda(andamento), processo: null }, efeitos);
     return (await ops.desfazerTrocas(andamento)) > 0 ? { tipo: "recomposta" } : { tipo: "nada" };
   } catch (erro) {
     return { tipo: "falhou", detalhe: mensagem(erro) };
@@ -945,12 +1010,7 @@ export function efeitosReais(): Efeitos {
       return { pid: filho.pid, fim };
     },
     inicioDoProcesso,
-    processoVivo(pid, inicio) {
-      if (!existe(pid)) return false;
-      if (inicio === null) return true;
-      const agora = inicioDoProcesso(pid);
-      return agora === null || agora === inicio;
-    },
+    existe,
     async encerrarArvore(pid) {
       // `kill` com 0, -1 ou 1 alcança o grupo de quem chama, todos os processos do usuário ou o init.
       if (!Number.isSafeInteger(pid) || pid <= 1 || pid === process.pid) return false;

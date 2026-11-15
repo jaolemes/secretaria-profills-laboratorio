@@ -319,14 +319,12 @@ describe("matar o atualizador com o instalar da versão nova ainda vivo", () => 
       if (instalando.pid === undefined) throw new Error("o instalar não nasceu");
       soltos.push(instalando.pid);
       const neto = await pidAnunciado("neto");
-      const inicio = efeitos.inicioDoProcesso(instalando.pid);
-      expect(efeitos.processoVivo(instalando.pid, inicio)).toBe(true);
-      expect(efeitos.processoVivo(instalando.pid, "outra hora")).toBe(false);
+      expect(efeitos.existe(instalando.pid)).toBe(true);
 
       expect(await efeitos.encerrarArvore(instalando.pid)).toBe(true);
 
       expect(await instalando.fim).toMatchObject({ ok: false });
-      expect(efeitos.processoVivo(instalando.pid, inicio)).toBe(false);
+      expect(efeitos.existe(instalando.pid)).toBe(false);
       expect(await morreu(neto)).toBe(true);
     },
     PRAZO_DO_TESTE_MS,

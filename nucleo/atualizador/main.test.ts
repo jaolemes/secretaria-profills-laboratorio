@@ -12,6 +12,7 @@ import {
   efeitosReais,
   haAtualizacaoPendente,
   lerAndamento,
+  msDoInicio,
   recomporArvore,
   recuperar,
   unidadeDaTroca,
@@ -59,7 +60,7 @@ function efeitosDeTeste(mudancas: Partial<Efeitos> = {}): Efeitos & { readonly f
       return { ok: true };
     }),
     inicioDoProcesso: () => null,
-    processoVivo: () => false,
+    existe: () => false,
     encerrarArvore: async () => true,
     subirServidor(raizDoRepo, dirDados) {
       const pid = PRIMEIRO_SERVIDOR + subidas;
@@ -571,7 +572,7 @@ describe("a volta de uma atualização que morreu no meio", () => {
     ["contagem de arquivos mudados negativa", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", mudados: { quantos: -1, caminhos: [] } })],
     ["processo com um pid que alcançaria todos os processos", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "instalar", processo: { papel: "instalar", pid: 1, inicio: null } })],
     ["processo de um papel que esta versão não conhece", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "instalar", processo: { papel: "outro", pid: 4242, inicio: null } })],
-    ["plano que aponta as permissões locais",JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", trocas: [{ caminho: ".claude/settings.local.json", tinhaAntiga: true, temNova: false }] })],
+    ["plano que aponta as permissões locais", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", trocas: [{ caminho: ".claude/settings.local.json", tinhaAntiga: true, temNova: false }] })],
   ])("andamento com %s não manda em rename nenhum", async (_nome, texto) => {
     instalacao = montarInstalacao();
     const pasta = retratoDaPasta(instalacao.raiz);
@@ -594,7 +595,7 @@ describe("o processo que o atualizador subiu", () => {
     const efeitos = efeitosDeTeste({
       iniciarInstalar: () => ({ pid: PID_DO_INSTALAR, fim: new Promise<Instalado>((resolver) => (sair = resolver)) }),
       inicioDoProcesso: () => INSTALAR.inicio,
-      processoVivo: (pid, inicio) => vivo && pid === INSTALAR.pid && inicio === INSTALAR.inicio,
+      existe: (pid) => vivo && pid === INSTALAR.pid,
       async encerrarArvore(pid) {
         encerrados.push(pid);
         if (!encerra) return false;
@@ -729,6 +730,77 @@ describe("o pid anotado sem a hora de início", () => {
       instalar.kill(process.platform === "win32" ? undefined : "SIGKILL");
       await instalar.exited;
     }
+  });
+
+  test("sem como ler a hora, ninguém é encerrado: a volta espera até o prazo do instalar e depois segue", async () => {
+    instalacao = montarInstalacao();
+    const encerrados: number[] = [];
+    const efeitos = efeitosDeTeste({ existe: () => true, inicioDoProcesso: () => null, encerrarArvore: async (pid) => (encerrados.push(pid), true) });
+    const agora = new Date().toISOString();
+    gravar(noInstalar(PID_DO_INSTALAR, agora, agora));
+    const pasta = retratoDaPasta(instalacao.raiz);
+
+    expect(await voltar(efeitos)).toEqual({ tipo: "em_andamento" });
+    expect(andamentoNoDisco()).toMatchObject({ fase: "instalar", processo: { pid: PID_DO_INSTALAR } });
+    gravar({ ...noInstalar(PID_DO_INSTALAR, agora, agora), fase: "trocar", trocas: [{ caminho: "nucleo", tinhaAntiga: true, temNova: true }] });
+    expect(await recomporArvore(instalacao.raiz, efeitos)).toEqual({ tipo: "em_andamento" });
+    expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
+
+    gravar(noInstalar(PID_DO_INSTALAR, HA_MUITO, HA_MUITO));
+    expect(await voltar(efeitos)).toEqual({ tipo: "desfeita", de: "0.1.0", para: "0.2.0" });
+    expect(encerrados).toEqual([]);
+  });
+
+  test("sem como ler a hora, o atualizador ainda encerra o instalar que ele segura e que passou do prazo", async () => {
+    instalacao = montarInstalacao();
+    const pasta = retratoDaPasta(instalacao.raiz);
+    const encerrados: number[] = [];
+    let sair = (_instalado: Instalado) => {};
+    const efeitos = efeitosDeTeste({
+      iniciarInstalar: () => ({ pid: PID_DO_INSTALAR, fim: new Promise<Instalado>((resolver) => (sair = resolver)) }),
+      existe: () => encerrados.length === 0,
+      inicioDoProcesso: () => null,
+      async encerrarArvore(pid) {
+        encerrados.push(pid);
+        sair({ ok: false, detalhe: "encerrado" });
+        return true;
+      },
+    });
+
+    const desfecho = await atualizar({ raizDoRepo: instalacao.raiz, dirDados: instalacao.dirDados, prazos: { ...PRAZOS_CURTOS, instalarMs: 20 } }, efeitos);
+
+    expect(desfecho).toMatchObject({ tipo: "desfeita", servidorNoAr: true, andamento: { processo: null, falha: { passo: "instalar" } } });
+    expect(encerrados).toEqual([PID_DO_INSTALAR]);
+    expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
+  });
+
+  test("o instalar que já saiu sozinho sai do andamento antes da volta, sem ser encerrado pelo pid", async () => {
+    instalacao = montarInstalacao();
+    const encerrados: number[] = [];
+    const efeitos = efeitosDeTeste({
+      iniciarInstalar: () => ({ pid: PID_DO_INSTALAR, fim: Promise.resolve({ ok: false, detalhe: "falhou" }) }),
+      existe: () => true,
+      inicioDoProcesso: () => null,
+      encerrarArvore: async (pid) => (encerrados.push(pid), true),
+    });
+
+    expect(await rodar(efeitos)).toMatchObject({ tipo: "desfeita", andamento: { processo: null, falha: { passo: "instalar" } } });
+    expect(encerrados).toEqual([]);
+  });
+
+  test("a hora de início vira o relógio de cada sistema", () => {
+    expect(msDoInicio("Sun Nov 15 11:19:30 2026", "darwin")).toBe(new Date(2026, 10, 15, 11, 19, 30).getTime());
+    expect(msDoInicio("Sun Nov  5 09:01:02 2026", "darwin")).toBe(new Date(2026, 10, 5, 9, 1, 2).getTime());
+    expect(msDoInicio(String(621_355_968_000_000_000n + 17_000_000_000_000_000n), "win32")).toBe(1_700_000_000_000);
+    expect(msDoInicio("hora do instalar", "win32")).toBeNull();
+    expect(msDoInicio("hora do instalar", "darwin")).toBeNull();
+    expect(msDoInicio("hora do instalar", "linux")).toBeNull();
+
+    const inicio = efeitosReais().inicioDoProcesso(process.pid);
+    if (inicio === null) throw new Error("o sistema não deu a hora de início deste processo");
+    const nasceu = msDoInicio(inicio, process.platform);
+    expect(nasceu).not.toBeNull();
+    expect(Math.abs((nasceu ?? 0) - (Date.now() - process.uptime() * 1_000))).toBeLessThan(2_000);
   });
 });
 

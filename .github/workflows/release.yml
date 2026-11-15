@@ -1,0 +1,108 @@
+name: Release
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  montar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - name: A versão que não é de teste sai da main
+        if: ${{ !endsWith(github.ref_name, '-teste') }}
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+      - name: Monta o pacote e o manifesto
+        run: git ls-files -z | bun nucleo/atualizacao/release.ts montar "$TAG" "$RUNNER_TEMP/versao"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: versao
+          path: ${{ runner.temp }}/versao
+          if-no-files-found: error
+          retention-days: 7
+
+  conferir:
+    needs: montar
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: versao
+          path: ${{ runner.temp }}/versao
+      - name: Confere o sha256 e extrai o pacote
+        run: bun nucleo/atualizacao/release.ts conferir "$TAG" "$RUNNER_TEMP/versao" "$RUNNER_TEMP/extraido"
+      - name: Instala as dependências do pacote extraído
+        working-directory: ${{ runner.temp }}/extraido
+        run: bun install --frozen-lockfile
+      - name: Confere os tipos do pacote extraído
+        working-directory: ${{ runner.temp }}/extraido
+        run: bun run tipos
+
+  publicar:
+    needs: [montar, conferir]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # O ambiente pede a aprovação do dono antes de o job começar, e só ele tem a chave de assinatura.
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: versao
+          path: ${{ runner.temp }}/versao
+      # Sem `bun install`: o passo que vê a chave roda só o código do repo e o Bun.
+      - name: Assina o manifesto
+        env:
+          SECRETARIA_CHAVE_DE_ASSINATURA: ${{ secrets.SECRETARIA_CHAVE_DE_ASSINATURA }}
+        run: git ls-files -z | bun nucleo/atualizacao/release.ts assinar "$TAG" "$RUNNER_TEMP/versao"
+      - name: Publica a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tipo=(--latest)
+          if [[ "$TAG" == *-teste ]]; then tipo=(--prerelease --latest=false); fi
+          gh release create "$TAG" "$RUNNER_TEMP/versao/versao.json" "$RUNNER_TEMP"/versao/secretaria-*.tar.gz \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --title "Secretária ${TAG#v}" \
+            --notes-file "$RUNNER_TEMP/versao/notas.md" "${tipo[@]}"

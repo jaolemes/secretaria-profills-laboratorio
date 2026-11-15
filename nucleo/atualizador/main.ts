@@ -1,0 +1,864 @@
+/**
+ * O atualizador troca o código da Secretária pela versão nova já extraída em `.atualizacao/nova/`,
+ * com o servidor parado, e desfaz tudo se algo falhar.
+ *
+ * Este arquivo só importa do Bun e do `node:`. Ele roda enquanto as pastas do repo mudam de lugar:
+ * um import resolvido depois da troca leria código de outra versão.
+ */
+import { Database } from "bun:sqlite";
+import { spawn, spawnSync } from "node:child_process";
+import { chmodSync, closeSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+
+/** Os passos, na ordem em que rodam. O `andamento.json` diz em qual o atualizador está. */
+export const PASSOS = ["esperar_banco", "preparar", "copiar", "trocar", "instalar", "subir"] as const;
+export type Passo = (typeof PASSOS)[number];
+
+/**
+ * `preparado`: o servidor gravou o arquivo e o atualizador ainda não começou. `desfazer`: a volta
+ * começou. `concluido` e `desfeito` são os finais: só neles a pasta está inteira numa versão só.
+ */
+export const FASES = ["preparado", ...PASSOS, "desfazer", "concluido", "desfeito"] as const;
+export type Fase = (typeof FASES)[number];
+
+export const MOTIVOS = [
+  "banco_em_uso",
+  "versao_nova_invalida",
+  "copia_falhou",
+  "troca_falhou",
+  "instalar_falhou",
+  "servidor_nao_subiu",
+  /** O atualizador morreu no meio (queda de luz, processo encerrado) e a volta foi feita depois. */
+  "interrompida",
+] as const;
+export type Motivo = (typeof MOTIVOS)[number];
+
+/**
+ * Uma entrada da troca: pasta ou arquivo que sai inteiro para `.atualizacao/anterior/` e dá lugar
+ * ao de `.atualizacao/nova/`. Os dois campos dizem o que existia antes do primeiro rename, e é por
+ * eles que a volta sabe o que devolver e o que tirar.
+ */
+export interface Troca {
+  readonly caminho: string;
+  readonly tinhaAntiga: boolean;
+  readonly temNova: boolean;
+}
+
+/** `<repo>/.atualizacao/andamento.json`. Gravado por arquivo temporário e rename, a cada mudança de fase. */
+export interface Andamento {
+  readonly v: 1;
+  /** Versão instalada antes. `null` quando o `package.json` não deu a versão. */
+  readonly de: string | null;
+  readonly para: string | null;
+  readonly iniciadoEm: string;
+  readonly atualizadoEm: string;
+  readonly fase: Fase;
+  /** O plano da troca, gravado antes do primeiro rename. */
+  readonly trocas: readonly Troca[];
+  /** Verdadeiro desde que o `instalar` da versão nova pôde migrar o banco: a volta devolve as cópias. */
+  readonly restaurarDados: boolean;
+  /** Arquivos do núcleo que não batiam com a lista da versão instalada. `null`: sem lista para comparar. */
+  readonly mudados: { readonly quantos: number; readonly caminhos: readonly string[] } | null;
+  readonly falha: { readonly passo: Passo; readonly motivo: Motivo; readonly detalhe: string } | null;
+}
+
+export interface Prazos {
+  readonly bancoMs: number;
+  readonly instalarMs: number;
+  readonly servidorMs: number;
+  readonly intervaloMs: number;
+  /** Esperas entre as tentativas de um rename que o Windows recusou por arquivo em uso. */
+  readonly esperasDoRenameMs: readonly number[];
+}
+
+export const PRAZOS: Prazos = { bancoMs: 30_000, instalarMs: 900_000, servidorMs: 60_000, intervaloMs: 250, esperasDoRenameMs: [100, 200, 400, 800, 1_500] };
+
+export interface ServidorSubindo {
+  readonly pid: number | undefined;
+  saiu(): boolean;
+  encerrar(): Promise<void>;
+}
+
+/** O que o atualizador faz fora da própria pasta de trabalho. O teste troca um por vez para injetar a falha. */
+export interface Efeitos {
+  readonly plataforma: NodeJS.Platform;
+  renomear(de: string, para: string): void;
+  /** Copia arquivo ou pasta inteira. */
+  copiar(de: string, para: string): void;
+  /** Ninguém segura este SQLite agora. Arquivo que não existe está livre. */
+  bancoLivre(caminho: string): boolean;
+  /** Roda o `instalar` do código que está em `raizDoRepo`. */
+  instalar(raizDoRepo: string, dirDados: string, prazoMs: number): Promise<{ readonly ok: true } | { readonly ok: false; readonly detalhe: string }>;
+  subirServidor(raizDoRepo: string, dirDados: string): ServidorSubindo;
+  /** A versão que o servidor de pid `pid` responde em `/api/info`, ou `null` enquanto ele não responde. */
+  versaoNoAr(dirDados: string, pid: number | undefined): Promise<string | null>;
+  /** Chamado depois de cada gravação do andamento. */
+  observar(andamento: Andamento): void;
+}
+
+const LISTA_DO_PACOTE = "arquivos-da-versao.json";
+const PADRAO_DE_VERSAO = /^\d+\.\d+\.\d+$/;
+const SEGMENTO = /^[A-Za-z0-9._-]+$/;
+const PASTAS_DA_PROFILLS = ["nucleo", "docs", "testes", "novidades"];
+const FORA_DA_RAIZ = ["meu", "node_modules", ".git", ".atualizacao", ".agents", ".claude"];
+const TETO_DE_CAMINHOS_MUDADOS = 100;
+
+export function caminhosDoAtualizador(raizDoRepo: string, dirDados: string) {
+  const pasta = path.join(raizDoRepo, ".atualizacao");
+  return {
+    pasta,
+    nova: path.join(pasta, "nova"),
+    anterior: path.join(pasta, "anterior"),
+    andamento: path.join(pasta, "andamento.json"),
+    /** Cópia deste arquivo, fora das pastas trocadas: o `entrada.ts` a roda quando a troca parou no meio. */
+    atualizadorGuardado: path.join(pasta, "atualizador.ts"),
+    /** SQLite vazio que o atualizador segura enquanto vive. O sistema solta o lock quando o processo morre. */
+    trava: path.join(pasta, "trava.db"),
+    banco: path.join(dirDados, "secretaria.db"),
+    bancoDoVendedor: path.join(dirDados, "meu.db"),
+    wacli: path.join(dirDados, "bin", process.platform === "win32" ? "wacli.exe" : "wacli"),
+    servidor: path.join(dirDados, "servidor.json"),
+    saidaDoServidor: path.join(dirDados, "logs", "servidor-saida.log"),
+    /** Cópia dos bancos, do `meu/` e do wacli de antes da troca para `versao`. */
+    copias: (versao: string) => path.join(dirDados, "atualizacoes", versao, "antes"),
+  } as const;
+}
+
+/**
+ * A entrada da troca a que um caminho do pacote pertence, ou `null` quando ele está fora da lista
+ * de troca. É a mesma regra de `entraNaTroca`, do pacote: `testes/conferencias/atualizador.test.ts`
+ * cobra que as duas concordem.
+ */
+export function unidadeDaTroca(caminho: string): string | null {
+  const partes = caminho.split("/");
+  if (partes.some((parte) => !SEGMENTO.test(parte) || parte.endsWith("."))) return null;
+  const [primeira = "", segunda, terceira = ""] = partes;
+  if (partes.length === 1) return FORA_DA_RAIZ.includes(primeira.toLowerCase()) ? null : caminho;
+  if (PASTAS_DA_PROFILLS.includes(primeira)) return primeira;
+  if (caminho === ".claude/settings.json") return caminho;
+  if (primeira === ".agents" && segunda === "skills" && partes.length >= 4 && !terceira.toLowerCase().startsWith("meu-")) return `.agents/skills/${terceira}`;
+  return null;
+}
+
+function ehUnidade(caminho: string): boolean {
+  if (caminho === "node_modules") return true;
+  // Um arquivo qualquer dentro da entrada cai nela mesma: é assim que se reconhece uma entrada.
+  return unidadeDaTroca(caminho) === caminho || unidadeDaTroca(`${caminho}/x`) === caminho;
+}
+
+function ehFinal(fase: Fase): boolean {
+  return fase === "concluido" || fase === "desfeito";
+}
+
+function sha256De(bytes: Uint8Array): string {
+  return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+}
+
+function mensagem(erro: unknown): string {
+  return erro instanceof Error ? erro.message : String(erro);
+}
+
+function ehObjeto(valor: unknown): valor is Record<string, unknown> {
+  return typeof valor === "object" && valor !== null && !Array.isArray(valor);
+}
+
+function versaoDe(pasta: string): string | null {
+  try {
+    const lido: unknown = JSON.parse(readFileSync(path.join(pasta, "package.json"), "utf8"));
+    return ehObjeto(lido) && typeof lido.version === "string" && PADRAO_DE_VERSAO.test(lido.version) ? lido.version : null;
+  } catch {
+    return null;
+  }
+}
+
+function versaoMaior(candidata: string, instalada: string): boolean {
+  const a = candidata.split(".").map(Number);
+  const b = instalada.split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    const diferenca = (a[i] ?? 0) - (b[i] ?? 0);
+    if (diferenca !== 0) return diferenca > 0;
+  }
+  return false;
+}
+
+interface Lista {
+  readonly versao: string;
+  readonly arquivos: readonly { readonly caminho: string; readonly sha256: string }[];
+}
+
+function lerLista(pasta: string): Lista | null {
+  try {
+    const lido: unknown = JSON.parse(readFileSync(path.join(pasta, LISTA_DO_PACOTE), "utf8"));
+    if (!ehObjeto(lido) || typeof lido.versao !== "string" || !Array.isArray(lido.arquivos)) return null;
+    const arquivos: { caminho: string; sha256: string }[] = [];
+    for (const item of lido.arquivos as unknown[]) {
+      if (!ehObjeto(item) || typeof item.caminho !== "string" || typeof item.sha256 !== "string") return null;
+      arquivos.push({ caminho: item.caminho, sha256: item.sha256 });
+    }
+    return { versao: lido.versao, arquivos };
+  } catch {
+    return null;
+  }
+}
+
+export type AndamentoLido = { readonly tipo: "ausente" } | { readonly tipo: "ilegivel" } | { readonly tipo: "lido"; readonly andamento: Andamento };
+
+/** Lê o andamento como dado de fora: o plano dele manda em renames, então cada caminho precisa ser uma entrada da troca. */
+export function lerAndamento(caminho: string): AndamentoLido {
+  let texto: string;
+  try {
+    texto = readFileSync(caminho, "utf8");
+  } catch {
+    return { tipo: "ausente" };
+  }
+  let lido: unknown;
+  try {
+    lido = JSON.parse(texto);
+  } catch {
+    return { tipo: "ilegivel" };
+  }
+  const versaoOuNada = (valor: unknown): valor is string | null => valor === null || (typeof valor === "string" && PADRAO_DE_VERSAO.test(valor));
+  if (!ehObjeto(lido) || lido.v !== 1 || !versaoOuNada(lido.de) || !versaoOuNada(lido.para)) return { tipo: "ilegivel" };
+  const { de, para, iniciadoEm, atualizadoEm, fase, trocas, restaurarDados, mudados, falha } = lido;
+  if (typeof iniciadoEm !== "string" || typeof atualizadoEm !== "string" || typeof restaurarDados !== "boolean") return { tipo: "ilegivel" };
+  if (!(FASES as readonly unknown[]).includes(fase) || !Array.isArray(trocas)) return { tipo: "ilegivel" };
+  const plano: Troca[] = [];
+  for (const troca of trocas as unknown[]) {
+    if (!ehObjeto(troca) || typeof troca.caminho !== "string" || !ehUnidade(troca.caminho)) return { tipo: "ilegivel" };
+    if (typeof troca.tinhaAntiga !== "boolean" || typeof troca.temNova !== "boolean") return { tipo: "ilegivel" };
+    plano.push({ caminho: troca.caminho, tinhaAntiga: troca.tinhaAntiga, temNova: troca.temNova });
+  }
+  let contagem: Andamento["mudados"] = null;
+  if (mudados !== null) {
+    if (!ehObjeto(mudados) || !Number.isSafeInteger(mudados.quantos) || (mudados.quantos as number) < 0 || !Array.isArray(mudados.caminhos)) return { tipo: "ilegivel" };
+    contagem = { quantos: mudados.quantos as number, caminhos: (mudados.caminhos as unknown[]).filter((item): item is string => typeof item === "string") };
+  }
+  let motivoDaFalha: Andamento["falha"] = null;
+  if (falha !== null) {
+    if (!ehObjeto(falha) || !(PASSOS as readonly unknown[]).includes(falha.passo) || !(MOTIVOS as readonly unknown[]).includes(falha.motivo)) return { tipo: "ilegivel" };
+    motivoDaFalha = { passo: falha.passo as Passo, motivo: falha.motivo as Motivo, detalhe: typeof falha.detalhe === "string" ? falha.detalhe : "" };
+  }
+  return {
+    tipo: "lido",
+    andamento: { v: 1, de, para, iniciadoEm, atualizadoEm, fase: fase as Fase, trocas: plano, restaurarDados, mudados: contagem, falha: motivoDaFalha },
+  };
+}
+
+function gravarAndamento(caminho: string, andamento: Andamento): void {
+  mkdirSync(path.dirname(caminho), { recursive: true });
+  const temporario = `${caminho}.${process.pid}.tmp`;
+  writeFileSync(temporario, JSON.stringify(andamento));
+  renameSync(temporario, caminho);
+}
+
+/** O andamento que o servidor grava antes de subir o atualizador e pedir a própria parada. */
+export function andamentoPreparado(de: string, para: string): Andamento {
+  const agora = new Date().toISOString();
+  return { v: 1, de, para, iniciadoEm: agora, atualizadoEm: agora, fase: "preparado", trocas: [], restaurarDados: false, mudados: null, falha: null };
+}
+
+/** Há uma atualização que não chegou a um fim? Não muda nada: é a pergunta barata que o `abrir` faz. */
+export function haAtualizacaoPendente(raizDoRepo: string): boolean {
+  const lido = lerAndamento(caminhosDoAtualizador(raizDoRepo, "").andamento);
+  return lido.tipo === "ilegivel" || (lido.tipo === "lido" && !ehFinal(lido.andamento.fase));
+}
+
+/** Abre o SQLite como único dono, do jeito que o servidor abre o banco. `null`: outro processo o segura. */
+function abrirExclusivo(caminho: string): Database | null {
+  const sqlite = new Database(caminho, { create: true, strict: true });
+  try {
+    sqlite.run("PRAGMA busy_timeout = 0");
+    sqlite.run("PRAGMA locking_mode = EXCLUSIVE");
+    sqlite.run("PRAGMA journal_mode = WAL");
+    sqlite.run("BEGIN IMMEDIATE");
+    sqlite.run("COMMIT");
+    return sqlite;
+  } catch (erro) {
+    sqlite.close();
+    if ((erro as { code?: string }).code === "SQLITE_BUSY") return null;
+    throw erro;
+  }
+}
+
+/** Um atualizador ou uma volta por vez nesta pasta. `null`: outro processo vivo já segura a trava. */
+function segurarTrava(caminho: string): { soltar(): void } | null {
+  mkdirSync(path.dirname(caminho), { recursive: true });
+  const sqlite = abrirExclusivo(caminho);
+  return sqlite === null ? null : { soltar: () => sqlite.close() };
+}
+
+async function esperarAte(condicao: () => boolean | Promise<boolean>, prazoMs: number, intervaloMs: number): Promise<boolean> {
+  const fim = Date.now() + prazoMs;
+  for (;;) {
+    if (await condicao()) return true;
+    if (Date.now() >= fim) return false;
+    await Bun.sleep(intervaloMs);
+  }
+}
+
+class Falha extends Error {
+  constructor(
+    readonly motivo: Motivo,
+    detalhe: string,
+  ) {
+    super(detalhe);
+    this.name = "Falha";
+  }
+}
+
+const USO_NO_WINDOWS = ["EPERM", "EBUSY", "EACCES"];
+
+function tipoDe(caminho: string): "arquivo" | "link" | "outro" | null {
+  try {
+    const estado = lstatSync(caminho);
+    return estado.isSymbolicLink() ? "link" : estado.isFile() ? "arquivo" : "outro";
+  } catch {
+    return null;
+  }
+}
+
+const ehArquivo = (caminho: string) => tipoDe(caminho) === "arquivo";
+const ehLink = (caminho: string) => tipoDe(caminho) === "link";
+
+/** As operações sobre uma instalação. Tudo aqui chega ao mesmo fim se rodar de novo. */
+function operacoes(raizDoRepo: string, dirDados: string, prazos: Prazos, efeitos: Efeitos) {
+  const caminhos = caminhosDoAtualizador(raizDoRepo, dirDados);
+  const em = (base: string, caminho: string) => path.join(base, ...caminho.split("/"));
+
+  /** No Windows, antivírus ou editor seguram um arquivo por instantes: tenta de novo poucas vezes antes de desistir. */
+  async function renomear(de: string, para: string): Promise<void> {
+    for (let tentativa = 0; ; tentativa++) {
+      try {
+        efeitos.renomear(de, para);
+        return;
+      } catch (erro) {
+        const espera = prazos.esperasDoRenameMs[tentativa];
+        const emUso = efeitos.plataforma === "win32" && USO_NO_WINDOWS.includes((erro as NodeJS.ErrnoException).code ?? "");
+        if (!emUso || espera === undefined) throw erro;
+        await Bun.sleep(espera);
+      }
+    }
+  }
+
+  /** Copia o arquivo por um nome temporário: `destino` só aparece inteiro. */
+  async function copiarArquivo(de: string, destino: string): Promise<void> {
+    const parcial = `${destino}.parcial`;
+    mkdirSync(path.dirname(destino), { recursive: true });
+    efeitos.copiar(de, parcial);
+    await renomear(parcial, destino);
+  }
+
+  /**
+   * Arquivo no lugar de arquivo troca sem buraco: a cópia da antiga vai para `anterior/` e a nova
+   * entra por cima, num rename só. Assim o `package.json` e o `entrada.ts`, por onde o
+   * `bun secretaria` começa, nunca faltam. Pasta não entra por cima de pasta: ela sai e a nova
+   * entra, e o buraco entre os dois renames é o que o `entrada.ts` sabe recompor.
+   */
+  async function trocar(troca: Troca): Promise<void> {
+    const noRepo = em(raizDoRepo, troca.caminho);
+    const naNova = em(caminhos.nova, troca.caminho);
+    const naAnterior = em(caminhos.anterior, troca.caminho);
+    if (ehLink(naNova)) throw new Falha("troca_falhou", `${troca.caminho} da versão nova é um link`);
+    if (troca.tinhaAntiga && !existsSync(naAnterior)) {
+      if (ehArquivo(noRepo) && ehArquivo(naNova)) await copiarArquivo(noRepo, naAnterior);
+      else {
+        mkdirSync(path.dirname(naAnterior), { recursive: true });
+        await renomear(noRepo, naAnterior);
+      }
+    }
+    if (troca.temNova && existsSync(naNova)) {
+      mkdirSync(path.dirname(noRepo), { recursive: true });
+      await renomear(naNova, noRepo);
+    }
+  }
+
+  /** Verdadeiro quando moveu alguma coisa. */
+  async function destrocar(troca: Troca): Promise<boolean> {
+    const noRepo = em(raizDoRepo, troca.caminho);
+    const naNova = em(caminhos.nova, troca.caminho);
+    const naAnterior = em(caminhos.anterior, troca.caminho);
+    // O que está no repo só é da versão nova se a antiga já saiu (ou nunca existiu) e a nova não está mais em `nova/`.
+    let moveu = false;
+    if (troca.temNova && !existsSync(naNova) && existsSync(noRepo) && (!troca.tinhaAntiga || existsSync(naAnterior))) {
+      if (troca.tinhaAntiga && ehArquivo(noRepo) && ehArquivo(naAnterior)) await copiarArquivo(noRepo, naNova);
+      else {
+        mkdirSync(path.dirname(naNova), { recursive: true });
+        await renomear(noRepo, naNova);
+      }
+      moveu = true;
+    }
+    if (troca.tinhaAntiga && existsSync(naAnterior)) {
+      mkdirSync(path.dirname(noRepo), { recursive: true });
+      await renomear(naAnterior, noRepo);
+      moveu = true;
+    }
+    return moveu;
+  }
+
+  /** Quantas entradas voltaram de lugar. */
+  async function desfazerTrocas(andamento: Andamento): Promise<number> {
+    let movidas = 0;
+    for (const troca of [...andamento.trocas].reverse()) if (await destrocar(troca)) movidas += 1;
+    return movidas;
+  }
+
+  const BANCOS = ["secretaria.db", "meu.db"];
+  const SUFIXOS = ["", "-wal", "-shm"];
+
+  return {
+    caminhos,
+
+    /** Os dois bancos, o do núcleo e o do vendedor, porque a volta devolve as cópias dos dois. */
+    bancosLivres: () => efeitos.bancoLivre(caminhos.banco) && efeitos.bancoLivre(caminhos.bancoDoVendedor),
+
+    /** Confere a versão nova, monta o plano e conta o que o agente do vendedor mudou no núcleo. Não muda nada além de limpar `anterior/`. */
+    preparar(): Pick<Andamento, "trocas" | "mudados"> {
+      const instalada = versaoDe(raizDoRepo);
+      const nova = versaoDe(caminhos.nova);
+      const lista = lerLista(caminhos.nova);
+      if (instalada === null) throw new Falha("versao_nova_invalida", "o package.json da instalação não diz a versão");
+      if (nova === null || lista === null || lista.versao !== nova) throw new Falha("versao_nova_invalida", "a pasta da versão nova não tem package.json e lista da mesma versão");
+      if (!versaoMaior(nova, instalada)) throw new Falha("versao_nova_invalida", `a ${nova} não é maior que a ${instalada}`);
+      if (!existsSync(path.join(caminhos.nova, "node_modules"))) throw new Falha("versao_nova_invalida", "a versão nova veio sem as dependências instaladas");
+      if (!existsSync(path.join(caminhos.nova, "nucleo", "cli", "main.ts"))) throw new Falha("versao_nova_invalida", "a versão nova veio sem o CLI");
+
+      const unidades = new Set<string>(["node_modules", LISTA_DO_PACOTE]);
+      for (const { caminho } of lista.arquivos) {
+        const unidade = unidadeDaTroca(caminho);
+        if (unidade === null) throw new Falha("versao_nova_invalida", `${JSON.stringify(caminho)} está fora do que a atualização troca`);
+        unidades.add(unidade);
+      }
+      // O que a versão instalada trazia e a nova não traz sai junto: é assim que arquivo removido some.
+      const daInstalada = lerLista(raizDoRepo);
+      for (const { caminho } of daInstalada?.arquivos ?? []) {
+        const unidade = unidadeDaTroca(caminho);
+        if (unidade !== null) unidades.add(unidade);
+      }
+
+      let mudados: Andamento["mudados"] = null;
+      if (daInstalada !== null) {
+        const diferentes = daInstalada.arquivos.filter(({ caminho, sha256 }) => {
+          if (unidadeDaTroca(caminho) === null) return false;
+          const completo = em(raizDoRepo, caminho);
+          return !existsSync(completo) || sha256De(readFileSync(completo)) !== sha256;
+        });
+        mudados = { quantos: diferentes.length, caminhos: diferentes.slice(0, TETO_DE_CAMINHOS_MUDADOS).map(({ caminho }) => caminho) };
+      }
+
+      // Sobra da atualização anterior, que já chegou ao fim: só a mais recente fica guardada.
+      rmSync(caminhos.anterior, { recursive: true, force: true });
+      // `node_modules` vai primeiro: é a entrada com mais chance de estar em uso, e falhar nela não deixa nada para desfazer.
+      const ordem = ["node_modules", ...[...unidades].filter((unidade) => unidade !== "node_modules").sort()];
+      const trocas = ordem.map((caminho) => ({ caminho, tinhaAntiga: existsSync(em(raizDoRepo, caminho)), temNova: existsSync(em(caminhos.nova, caminho)) }));
+      return { trocas, mudados };
+    },
+
+    /**
+     * Guarda este arquivo fora das pastas trocadas e copia os bancos, o `meu/` e, se a trava mudou,
+     * o wacli. A pasta `antes/` só aparece com a cópia inteira.
+     */
+    async copiar(versao: string): Promise<void> {
+      await copiarArquivo(import.meta.path, caminhos.atualizadorGuardado);
+      const antes = caminhos.copias(versao);
+      const parcial = `${antes}.parcial`;
+      rmSync(parcial, { recursive: true, force: true });
+      rmSync(antes, { recursive: true, force: true });
+      mkdirSync(parcial, { recursive: true, mode: 0o700 });
+      for (const banco of BANCOS) {
+        for (const sufixo of SUFIXOS) {
+          const origem = path.join(dirDados, banco + sufixo);
+          if (existsSync(origem)) efeitos.copiar(origem, path.join(parcial, banco + sufixo));
+        }
+      }
+      const meu = path.join(raizDoRepo, "meu");
+      if (existsSync(meu)) efeitos.copiar(meu, path.join(parcial, "meu"));
+      const trava = (pasta: string) => {
+        try {
+          return readFileSync(path.join(pasta, "ferramentas.lock.json"));
+        } catch {
+          return null;
+        }
+      };
+      const [atual, nova] = [trava(raizDoRepo), trava(caminhos.nova)];
+      if ((atual === null || nova === null || !atual.equals(nova)) && existsSync(caminhos.wacli)) {
+        mkdirSync(path.join(parcial, "bin"), { recursive: true });
+        efeitos.copiar(caminhos.wacli, path.join(parcial, "bin", path.basename(caminhos.wacli)));
+      }
+      await renomear(parcial, antes);
+    },
+
+    async trocarTudo(trocas: readonly Troca[]): Promise<void> {
+      for (const troca of trocas) await trocar(troca);
+    },
+
+    desfazerTrocas,
+
+    /** A volta: devolve cada entrada na ordem inversa e, se o banco pôde ter migrado, as cópias de `antes/`. */
+    async desfazer(andamento: Andamento): Promise<void> {
+      await desfazerTrocas(andamento);
+      if (!andamento.restaurarDados || andamento.para === null) return;
+      const antes = caminhos.copias(andamento.para);
+      if (!existsSync(antes)) return;
+      for (const banco of BANCOS) {
+        for (const sufixo of SUFIXOS) rmSync(path.join(dirDados, banco + sufixo), { force: true });
+        for (const sufixo of SUFIXOS) {
+          const copia = path.join(antes, banco + sufixo);
+          if (!existsSync(copia)) continue;
+          copyFileSync(copia, path.join(dirDados, banco + sufixo));
+          if (process.platform !== "win32") chmodSync(path.join(dirDados, banco + sufixo), 0o600);
+        }
+      }
+      const wacli = path.join(antes, "bin", path.basename(caminhos.wacli));
+      if (existsSync(wacli)) {
+        copyFileSync(wacli, caminhos.wacli);
+        if (process.platform !== "win32") chmodSync(caminhos.wacli, 0o755);
+      }
+    },
+
+    async servidorResponde(servidor: ServidorSubindo, versao: string | null): Promise<boolean> {
+      let saiu = false;
+      const respondeu = await esperarAte(
+        async () => {
+          saiu = servidor.saiu();
+          return saiu || (await efeitos.versaoNoAr(dirDados, servidor.pid)) === versao;
+        },
+        prazos.servidorMs,
+        prazos.intervaloMs,
+      );
+      return respondeu && !saiu;
+    },
+  };
+}
+
+export type Desfecho =
+  /** Nada foi gravado nem mudado. */
+  | { readonly tipo: "recusada"; readonly motivo: "pasta_de_desenvolvimento" | "outra_em_andamento" | "atualizacao_interrompida" }
+  | { readonly tipo: "concluida"; readonly andamento: Andamento }
+  | { readonly tipo: "desfeita"; readonly andamento: Andamento; readonly servidorNoAr: boolean }
+  /** A volta parou no meio. O andamento fica em `desfazer`, e o próximo `abrir` a termina. */
+  | { readonly tipo: "volta_incompleta"; readonly andamento: Andamento; readonly detalhe: string };
+
+const MOTIVO_DO_PASSO: { readonly [P in Passo]: Motivo } = {
+  esperar_banco: "banco_em_uso",
+  preparar: "versao_nova_invalida",
+  copiar: "copia_falhou",
+  trocar: "troca_falhou",
+  instalar: "instalar_falhou",
+  subir: "servidor_nao_subiu",
+};
+
+/**
+ * Roda os passos com o servidor parado. Falha depois de o banco ficar livre desfaz o que foi
+ * feito e sobe o servidor antigo. Pasta com `.git` nunca é tocada.
+ */
+export async function atualizar(
+  opcoes: { readonly raizDoRepo: string; readonly dirDados: string; readonly prazos?: Partial<Prazos> },
+  efeitos: Efeitos = efeitosReais(),
+): Promise<Desfecho> {
+  const { raizDoRepo, dirDados } = opcoes;
+  if (existsSync(path.join(raizDoRepo, ".git"))) return { tipo: "recusada", motivo: "pasta_de_desenvolvimento" };
+  const prazos = { ...PRAZOS, ...opcoes.prazos };
+  const ops = operacoes(raizDoRepo, dirDados, prazos, efeitos);
+  const { caminhos } = ops;
+  const trava = segurarTrava(caminhos.trava);
+  if (trava === null) return { tipo: "recusada", motivo: "outra_em_andamento" };
+  try {
+    const anterior = lerAndamento(caminhos.andamento);
+    // Uma atualização que parou no meio se resolve pela volta do `abrir`, nunca por cima.
+    if (anterior.tipo === "ilegivel" || (anterior.tipo === "lido" && !ehFinal(anterior.andamento.fase) && anterior.andamento.fase !== "preparado")) {
+      return { tipo: "recusada", motivo: "atualizacao_interrompida" };
+    }
+
+    const agora = new Date().toISOString();
+    let andamento: Andamento = {
+      v: 1,
+      de: versaoDe(raizDoRepo),
+      para: versaoDe(caminhos.nova),
+      iniciadoEm: agora,
+      atualizadoEm: agora,
+      fase: "esperar_banco",
+      trocas: [],
+      restaurarDados: false,
+      mudados: null,
+      falha: null,
+    };
+    const gravar = (mudanca: Partial<Andamento>): Andamento => {
+      andamento = { ...andamento, ...mudanca, atualizadoEm: new Date().toISOString() };
+      gravarAndamento(caminhos.andamento, andamento);
+      efeitos.observar(andamento);
+      return andamento;
+    };
+    const falhaEm = (passo: Passo, erro: unknown): NonNullable<Andamento["falha"]> => ({
+      passo,
+      motivo: erro instanceof Falha ? erro.motivo : MOTIVO_DO_PASSO[passo],
+      detalhe: mensagem(erro),
+    });
+
+    gravar({});
+    if (!(await esperarAte(ops.bancosLivres, prazos.bancoMs, prazos.intervaloMs))) {
+      const detalhe = `o banco seguiu em uso por ${Math.round(prazos.bancoMs / 1000)} s`;
+      return { tipo: "desfeita", andamento: gravar({ fase: "desfeito", falha: { passo: "esperar_banco", motivo: "banco_em_uso", detalhe } }), servidorNoAr: false };
+    }
+
+    let passo: Passo = "preparar";
+    try {
+      gravar({ fase: passo });
+      const plano = ops.preparar();
+      const versao = andamento.para;
+      if (versao === null) throw new Falha("versao_nova_invalida", "a versão nova não diz a versão");
+      gravar({ fase: (passo = "copiar"), ...plano });
+      await ops.copiar(versao);
+      gravar({ fase: (passo = "trocar") });
+      await ops.trocarTudo(andamento.trocas);
+      gravar({ fase: (passo = "instalar"), restaurarDados: true });
+      const instalado = await efeitos.instalar(raizDoRepo, dirDados, prazos.instalarMs);
+      if (!instalado.ok) throw new Falha("instalar_falhou", instalado.detalhe);
+      gravar({ fase: (passo = "subir") });
+      const servidor = efeitos.subirServidor(raizDoRepo, dirDados);
+      if (!(await ops.servidorResponde(servidor, versao))) {
+        await servidor.encerrar();
+        throw new Falha("servidor_nao_subiu", `o servidor não respondeu a ${versao} em ${Math.round(prazos.servidorMs / 1000)} s`);
+      }
+      gravar({ fase: "concluido" });
+    } catch (erro) {
+      gravar({ fase: "desfazer", falha: falhaEm(passo, erro) });
+      try {
+        if (!(await esperarAte(ops.bancosLivres, prazos.bancoMs, prazos.intervaloMs))) throw new Error("o banco seguiu em uso");
+        await ops.desfazer(andamento);
+      } catch (naVolta) {
+        return { tipo: "volta_incompleta", andamento, detalhe: mensagem(naVolta) };
+      }
+      const desfeito = gravar({ fase: "desfeito" });
+      const antigo = efeitos.subirServidor(raizDoRepo, dirDados);
+      const servidorNoAr = await ops.servidorResponde(antigo, andamento.de);
+      if (!servidorNoAr) await antigo.encerrar();
+      return { tipo: "desfeita", andamento: desfeito, servidorNoAr };
+    }
+    try {
+      // Só o núcleo antigo interessa a quem mudou arquivo nele. As dependências antigas só ocupam disco.
+      rmSync(path.join(caminhos.anterior, "node_modules"), { recursive: true, force: true });
+    } catch {
+      // Fica para a atualização seguinte, que limpa `anterior/` inteira: a versão nova já está no ar.
+    }
+    return { tipo: "concluida", andamento };
+  } finally {
+    trava.soltar();
+  }
+}
+
+export type Recuperacao =
+  | { readonly tipo: "nada" }
+  /** Um atualizador vivo segura a trava. */
+  | { readonly tipo: "em_andamento" }
+  /** O servidor da versão nova já responde: só faltava gravar o fim. */
+  | { readonly tipo: "concluida"; readonly de: string | null; readonly para: string | null }
+  | { readonly tipo: "desfeita"; readonly de: string | null; readonly para: string | null }
+  | { readonly tipo: "banco_em_uso" }
+  /** Um servidor responde sobre uma pasta que a atualização pode ter deixado pela metade. A volta só roda com ele parado. */
+  | { readonly tipo: "servidor_no_meio"; readonly versaoNoAr: string }
+  | { readonly tipo: "falhou"; readonly detalhe: string };
+
+/** Nas fases antes da troca, a pasta e os bancos ainda são os da versão antiga. */
+const ANTES_DA_TROCA: readonly Fase[] = ["esperar_banco", "preparar", "copiar"];
+/** As fases em que a pasta pode estar rasgada, com uma entrada fora do lugar. */
+const RASGAM: readonly Fase[] = ["trocar", "desfazer"];
+
+function falhaDaQueda(andamento: Andamento): NonNullable<Andamento["falha"]> {
+  const passo: Passo = (PASSOS as readonly string[]).includes(andamento.fase) ? (andamento.fase as Passo) : "esperar_banco";
+  return andamento.falha ?? { passo, motivo: "interrompida", detalhe: "o atualizador parou antes de terminar" };
+}
+
+function regravar(caminho: string, andamento: Andamento, mudanca: Partial<Andamento>, efeitos: Efeitos): Andamento {
+  const novo = { ...andamento, ...mudanca, atualizadoEm: new Date().toISOString() };
+  gravarAndamento(caminho, novo);
+  efeitos.observar(novo);
+  return novo;
+}
+
+/**
+ * A volta de uma atualização que morreu no meio. Com o servidor parado, desfaz o que estiver em
+ * `.atualizacao/anterior/`, devolve as cópias e grava `desfeito`: quem chama sobe o servidor,
+ * que é o da versão antiga. `versaoNoAr` é a versão que o servidor responde agora, ou `null`.
+ */
+export async function recuperar(
+  opcoes: { readonly raizDoRepo: string; readonly dirDados: string; readonly versaoNoAr: string | null; readonly prazos?: Partial<Prazos> },
+  efeitos: Efeitos = efeitosReais(),
+): Promise<Recuperacao> {
+  const { raizDoRepo, dirDados } = opcoes;
+  if (existsSync(path.join(raizDoRepo, ".git")) || !haAtualizacaoPendente(raizDoRepo)) return { tipo: "nada" };
+  const ops = operacoes(raizDoRepo, dirDados, { ...PRAZOS, ...opcoes.prazos }, efeitos);
+  const { caminhos } = ops;
+  const trava = segurarTrava(caminhos.trava);
+  if (trava === null) return { tipo: "em_andamento" };
+  try {
+    const lido = lerAndamento(caminhos.andamento);
+    if (lido.tipo === "ilegivel") return { tipo: "falhou", detalhe: "o andamento.json da atualização não está num formato que esta versão lê" };
+    if (lido.tipo === "ausente" || ehFinal(lido.andamento.fase)) return { tipo: "nada" };
+    const { andamento } = lido;
+    const { de, para } = andamento;
+    const gravar = (mudanca: Partial<Andamento>) => regravar(caminhos.andamento, andamento, mudanca, efeitos);
+    const falha = falhaDaQueda(andamento);
+    if (opcoes.versaoNoAr !== null) {
+      // O servidor grava o `preparado` ainda no ar, antes de subir o atualizador e parar.
+      if (andamento.fase === "preparado") return { tipo: "nada" };
+      if (andamento.fase === "subir" && opcoes.versaoNoAr === para) {
+        gravar({ fase: "concluido" });
+        return { tipo: "concluida", de, para };
+      }
+      // Antes da troca nada mudou de lugar: o servidor no ar é o da versão antiga, e só falta gravar o fim.
+      if (ANTES_DA_TROCA.includes(andamento.fase)) {
+        gravar({ fase: "desfeito", falha });
+        return { tipo: "desfeita", de, para };
+      }
+      return { tipo: "servidor_no_meio", versaoNoAr: opcoes.versaoNoAr };
+    }
+    if (!ops.bancosLivres()) return { tipo: "banco_em_uso" };
+    if (andamento.fase !== "desfazer") gravar({ fase: "desfazer", falha });
+    await ops.desfazer(andamento);
+    gravar({ fase: "desfeito", falha });
+    return { tipo: "desfeita", de, para };
+  } catch (erro) {
+    return { tipo: "falhou", detalhe: mensagem(erro) };
+  } finally {
+    trava.soltar();
+  }
+}
+
+/** `recomposta`: alguma entrada voltou de lugar. `nada`: a pasta já estava inteira. */
+export type Recomposicao = { readonly tipo: "nada" } | { readonly tipo: "em_andamento" } | { readonly tipo: "recomposta" } | { readonly tipo: "falhou"; readonly detalhe: string };
+
+/**
+ * Põe de volta as entradas de uma troca que morreu no meio, sem tocar na pasta de dados. O
+ * `entrada.ts` roda isto da cópia em `.atualizacao/` antes de carregar o CLI, porque com `nucleo/`
+ * ou `node_modules/` fora do lugar o CLI nem carrega. O andamento fica em `desfazer`: devolver os
+ * bancos e gravar o fim é do `recuperar`, no `abrir`.
+ */
+export async function recomporArvore(raizDoRepo: string, efeitos: Efeitos = efeitosReais()): Promise<Recomposicao> {
+  if (existsSync(path.join(raizDoRepo, ".git"))) return { tipo: "nada" };
+  const ops = operacoes(raizDoRepo, "", PRAZOS, efeitos);
+  const { caminhos } = ops;
+  const rasgada = () => {
+    const lido = lerAndamento(caminhos.andamento);
+    return lido.tipo === "lido" && RASGAM.includes(lido.andamento.fase) ? lido.andamento : null;
+  };
+  if (rasgada() === null) return { tipo: "nada" };
+  const trava = segurarTrava(caminhos.trava);
+  if (trava === null) return { tipo: "em_andamento" };
+  try {
+    const andamento = rasgada();
+    if (andamento === null) return { tipo: "nada" };
+    if (andamento.fase !== "desfazer") regravar(caminhos.andamento, andamento, { fase: "desfazer", falha: falhaDaQueda(andamento) }, efeitos);
+    return (await ops.desfazerTrocas(andamento)) > 0 ? { tipo: "recomposta" } : { tipo: "nada" };
+  } catch (erro) {
+    return { tipo: "falhou", detalhe: mensagem(erro) };
+  } finally {
+    trava.soltar();
+  }
+}
+
+const PRAZO_DA_SONDA_MS = 3_000;
+const PRAZO_DO_ENCERRAMENTO_MS = 5_000;
+
+export function efeitosReais(): Efeitos {
+  const ambienteDosFilhos = (dirDados: string) => ({ ...process.env, SECRETARIA_DADOS: dirDados });
+  const cli = (raizDoRepo: string) => path.join(raizDoRepo, "nucleo", "cli", "main.ts");
+  return {
+    plataforma: process.platform,
+    renomear: renameSync,
+    copiar: (de, para) => cpSync(de, para, { recursive: true }),
+    bancoLivre(caminho) {
+      if (!existsSync(caminho)) return true;
+      const sqlite = abrirExclusivo(caminho);
+      sqlite?.close();
+      return sqlite !== null;
+    },
+    async instalar(raizDoRepo, dirDados, prazoMs) {
+      const feito = spawnSync(process.execPath, [cli(raizDoRepo), "instalar", "--json"], {
+        cwd: raizDoRepo,
+        env: ambienteDosFilhos(dirDados),
+        encoding: "utf8",
+        timeout: prazoMs,
+        windowsHide: true,
+      });
+      const ultima = (feito.stdout ?? "").trimEnd().split("\n").at(-1) ?? "";
+      let envelope: unknown = null;
+      try {
+        envelope = JSON.parse(ultima);
+      } catch {
+        envelope = null;
+      }
+      if (feito.status === 0 && ehObjeto(envelope) && envelope.ok === true) return { ok: true };
+      const erro = ehObjeto(envelope) && ehObjeto(envelope.erro) ? `${String(envelope.erro.codigo)}: ${String(envelope.erro.mensagem)}` : (feito.stderr ?? "").trim().slice(-500);
+      return { ok: false, detalhe: `o instalar saiu com ${feito.status ?? "limite de tempo"}. ${erro}`.trim() };
+    },
+    subirServidor(raizDoRepo, dirDados) {
+      const saida = caminhosDoAtualizador(raizDoRepo, dirDados).saidaDoServidor;
+      mkdirSync(path.dirname(saida), { recursive: true, mode: 0o700 });
+      const arquivo = openSync(saida, "a", 0o600);
+      // `detached` tira o servidor do grupo deste processo: ele segue vivo depois que o atualizador sai.
+      const filho = spawn(process.execPath, [cli(raizDoRepo), "servidor", "--json"], {
+        cwd: raizDoRepo,
+        env: ambienteDosFilhos(dirDados),
+        detached: true,
+        stdio: ["ignore", arquivo, arquivo],
+        windowsHide: true,
+      });
+      closeSync(arquivo);
+      let saiu = false;
+      filho.on("exit", () => (saiu = true));
+      filho.on("error", () => (saiu = true));
+      filho.unref();
+      const matar = async (sinal: NodeJS.Signals) => {
+        try {
+          filho.kill(sinal);
+        } catch {
+          return;
+        }
+        await esperarAte(() => saiu, PRAZO_DO_ENCERRAMENTO_MS, 25);
+      };
+      return {
+        pid: filho.pid,
+        saiu: () => saiu,
+        async encerrar() {
+          // No Windows todo sinal é o encerramento forçado; fora dele, o servidor ganha a chance de fechar o banco.
+          if (!saiu && process.platform !== "win32") await matar("SIGINT");
+          if (!saiu) await matar("SIGKILL");
+        },
+      };
+    },
+    async versaoNoAr(dirDados, pid) {
+      try {
+        const arquivo: unknown = JSON.parse(readFileSync(caminhosDoAtualizador("", dirDados).servidor, "utf8"));
+        if (!ehObjeto(arquivo) || arquivo.pid !== pid || typeof arquivo.origem !== "string" || !/^http:\/\/127\.0\.0\.1:\d+$/.test(arquivo.origem)) return null;
+        const resposta = await fetch(`${arquivo.origem}/api/info`, { signal: AbortSignal.timeout(PRAZO_DA_SONDA_MS) });
+        const corpo: unknown = await resposta.json();
+        if (!ehObjeto(corpo) || corpo.ok !== true || !ehObjeto(corpo.dados)) return null;
+        const { app, idInstalacao, versaoNucleo } = corpo.dados;
+        return app === "secretaria-profills" && idInstalacao === arquivo.idInstalacao && typeof versaoNucleo === "string" ? versaoNucleo : null;
+      } catch {
+        return null;
+      }
+    },
+    observar() {},
+  };
+}
+
+const USO = "uso: bun nucleo/atualizador/main.ts --repo <raiz da instalação> --dados <pasta de dados>\n";
+
+if (import.meta.main) {
+  const valorDe = (opcao: string) => {
+    const indice = process.argv.indexOf(opcao);
+    return indice === -1 ? undefined : process.argv[indice + 1];
+  };
+  const [repo, dados] = [valorDe("--repo"), valorDe("--dados")];
+  if (repo === undefined || dados === undefined) {
+    process.stderr.write(USO);
+    process.exit(2);
+  }
+  const raizDoRepo = path.resolve(repo);
+  // O Windows não renomeia a pasta em que um processo está: a raiz não muda de lugar, o resto muda.
+  process.chdir(raizDoRepo);
+  const desfecho = await atualizar({ raizDoRepo, dirDados: path.resolve(dados) });
+  process.stdout.write(`${JSON.stringify(desfecho)}\n`);
+  process.exit(desfecho.tipo === "concluida" ? 0 : 1);
+}

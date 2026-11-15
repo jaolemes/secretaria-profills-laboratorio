@@ -11,7 +11,7 @@ A Secretária é um processo Bun por vendedor. Ele serve o painel e a API em `12
 | Processos externos | `nucleo/processos` | só ele chama `Bun.spawn` e `node:child_process`; o filho do supervisor recebe uma lista curta de variáveis de ambiente |
 | Flags e formatos do wacli | `nucleo/conectores/whatsapp/wacli.ts` (flags, eventos) e `leitura.ts` (schemas das leituras) | `UsoDoWacli` não tem variante de envio; a leitura do agente aceita só as flags listadas por comando |
 
-`testes/conferencias/fronteiras.test.ts` reprova `bun:sqlite`, `Bun.spawn`, `node:child_process`, `Bun.secrets`, `imapflow`, `.revelar(` e `console.` fora dos donos, e import que fura o `index.ts` de outro módulo.
+`testes/conferencias/fronteiras.test.ts` reprova `bun:sqlite`, `Bun.spawn`, `node:child_process`, `Bun.secrets`, `imapflow`, `.revelar(` e `console.` fora dos donos, e import que fura o `index.ts` de outro módulo. A exceção é `nucleo/atualizador/main.ts`, que usa `bun:sqlite` e `node:child_process` direto: ele roda com o servidor parado, enquanto as pastas do núcleo mudam de lugar, e por isso não importa o banco nem os processos (seção "O atualizador").
 
 O instalador (`nucleo/instalador`) também abre o banco, mas só quando o servidor está parado. Com o servidor ligado, ele recebe `BancoEmUso` e deixa as migrações para o servidor.
 
@@ -917,6 +917,8 @@ O boot segue esta ordem: `servidor.pid`, banco, cofre, painel, porta, conectores
 | O programa sai com 0, ou segue vivo depois de 2 s, sem abrir janela | `abrir` não percebe e responde que abriu, com a frase de saída | `abrir` no terminal do vendedor |
 | Um processo segura o banco e o `servidor.pid` não o confirma como servidor | `parar --forcar` responde `banco_preso_por_outro` e não mata ninguém | reiniciar o computador |
 | Outro programa escuta a porta preferida, como a Secretária de outra pasta de dados | a porta abre com `reusePort: false` (o Bun 1.4.4 divide a porta sem essa opção), o servidor pega a seguinte livre, até 9 adiante, e grava a dele no `servidor.json` da pasta | nenhuma |
+| Uma atualização parou no meio (queda de luz, atualizador encerrado) | `abrir` desfaz a troca, devolve os bancos e sobe a versão antiga; a resposta traz `atualizacaoDesfeita` com as duas versões | nenhuma |
+| O atualizador está rodando | `abrir` responde `atualizacao_em_andamento` e não mexe em nada | esperar um minuto e `abrir` de novo |
 | Dois `abrir` na mesma pasta ao mesmo tempo | o que perde espera o servidor do outro e responde `subiu: false`: `subiu` vem do pid do `servidor.json`, igual ao do filho que o `abrir` subiu | nenhuma |
 | O `ambiente.json` tem campo desconhecido, valor que não serve ou JSON quebrado, ou não se lê | todo comando responde `ambiente_invalido`, com o campo e os campos que existem na mensagem | tirar ou corrigir o campo |
 
@@ -1054,7 +1056,7 @@ Não verificado: o workflow ainda não rodou no GitHub. A montagem, a conferênc
 
 ## Descoberta de versão nova
 
-O servidor confere se há versão nova buscando o `versao.json` em `ENDERECO_DA_ULTIMA_VERSAO`. Quem busca é o servidor, nunca o navegador: a CSP do painel fica como está. Aplicar a versão nova ainda não existe, e nada disso aparece no painel.
+O servidor confere se há versão nova buscando o `versao.json` em `ENDERECO_DA_ULTIMA_VERSAO`. Quem busca é o servidor, nunca o navegador: a CSP do painel fica como está. O servidor ainda não baixa o pacote nem chama o atualizador (seção "O atualizador"), e nada disso aparece no painel.
 
 ### Quando busca
 
@@ -1104,6 +1106,116 @@ O agente recebe cada frase de `oQueMuda` citada como dado, com `detalheComoDado`
 ### Teste
 
 `testes/falsos/release.ts` é a release falsa: serve o `versao.json` assinado por uma chave gerada na hora, um status sem corpo, um corpo cru ou um pedido que nunca responde, e conta os pedidos. O servidor recebe o endereço, as chaves e o prazo por `OpcoesDoServidor.versoes`, que só o teste passa; não é campo do `ambiente.json`. O palco aponta, por padrão, para uma porta morta: nenhum teste fala com o GitHub. `nucleo/atualizacao/descoberta.test.ts` cobre cada linha da tabela de resultado. `testes/servidor/atualizacao.test.ts` e `testes/cli/atualizacao.test.ts` cobrem, contra a release falsa, versão maior, igual e menor, chave desconhecida, corpo grande, prazo vencido, 429, o `.git`, o Bun mínimo, o intervalo de 6 horas com restart no meio, o intervalo de 30 s do agente e a busca única de dois pedidos.
+
+## O atualizador
+
+`nucleo/atualizador/main.ts` troca o código da instalação pela versão nova, com o servidor parado, e volta sozinho se algo falhar. Nenhuma rota o chama ainda: baixar o pacote, extrair em `.atualizacao/nova/`, instalar as dependências lá e subir o atualizador é o passo seguinte do servidor.
+
+O contrato com esse passo do servidor:
+
+- O servidor só extrai em `.atualizacao/nova/` o pacote cuja assinatura do `versao.json` e cujo sha256 ele conferiu (`conferirPacote`), e só pela extração de `nucleo/atualizacao`, que recusa `..`, caminho absoluto, link e caminho fora da lista de troca.
+- Só depois disso ele roda `bun install --frozen-lockfile` dentro de `nova/` e sobe o `main.ts` de `nova/`. Nada de `nova/` roda antes da conferência.
+- Ele segura a `trava.db` antes de gravar o `andamento.json` em `preparado`. Sem isso, um `abrir` entre a gravação e o início do atualizador acha o `preparado` sem dono, grava `desfeito` e sobe o servidor antigo enquanto o atualizador ainda vai começar.
+
+```
+bun .atualizacao/nova/nucleo/atualizador/main.ts --repo <raiz da instalação> --dados <pasta de dados>
+```
+
+Ele é um arquivo só e importa só do Bun e do `node:`. As pastas do núcleo mudam de lugar enquanto ele roda, então nada pode ser carregado depois da troca; `testes/conferencias/atualizador.test.ts` reprova qualquer outro import. Por isso ele repete, em poucas linhas, o jeito de abrir o SQLite como único dono e os caminhos da pasta de dados, e a mesma conferência cobra que os caminhos e a lista de troca sejam os do resto do núcleo. `nucleo/atualizador/index.ts` é só a porta para o CLI. O processo muda a pasta de trabalho para a raiz da instalação, que não muda de lugar.
+
+### A porta do `bun secretaria`
+
+O script `secretaria` do `package.json` é `bun entrada.ts`. O `entrada.ts` fica na raiz, fora das pastas trocadas, e só importa do Bun e do `node:`: uma queda entre os dois renames de `nucleo/` ou de `node_modules/` deixa a pasta sem eles, e o CLI não carrega. Antes de carregar o CLI, o `entrada.ts` roda `recomporArvore` da cópia do atualizador em `.atualizacao/atualizador.ts`, que o passo `copiar` grava antes da troca. Com o andamento em `trocar` ou `desfazer` e a trava livre, ela põe de volta cada entrada fora do lugar e deixa o andamento em `desfazer`. Devolver os bancos e gravar o fim é do `recuperar`, no `abrir`.
+
+Quando a `recomporArvore` move alguma coisa, o `entrada.ts` roda o CLI num processo novo. O Bun 1.4.4 guarda o que viu da pasta quando o processo começa: um `node_modules/` que voltou depois não é achado a partir de `nucleo/cli/` no mesmo processo (medido, `Cannot find package`). `testes/conferencias/atualizador.test.ts` cobra que o `entrada.ts` só importe do Bun e do `node:` e que o script aponte para ele.
+
+Pasta com `.git` nunca é atualizada: o atualizador sai com `recusada` antes de gravar qualquer arquivo, e a volta do `abrir` também não a toca.
+
+### A pasta de trabalho
+
+| Caminho | O que é |
+|---|---|
+| `<repo>/.atualizacao/nova/` | a versão nova extraída, com `node_modules/` |
+| `<repo>/.atualizacao/anterior/` | o que saiu na troca. Depois de uma atualização que deu certo, fica o núcleo antigo, sem `node_modules/`, até a atualização seguinte |
+| `<repo>/.atualizacao/andamento.json` | em que fase a atualização está, o plano da troca e o motivo da falha |
+| `<repo>/.atualizacao/atualizador.ts` | cópia do `main.ts` que escreveu o andamento, para o `entrada.ts` recompor a pasta |
+| `<repo>/.atualizacao/trava.db` | SQLite vazio que o atualizador e a volta seguram enquanto trabalham. O sistema solta o lock quando o processo morre |
+| `<dados>/atualizacoes/<versão>/antes/` | cópia de `secretaria.db`, `meu.db` (com `-wal` e `-shm`, se existirem), do `meu/` e, se `ferramentas.lock.json` mudou, do binário do wacli |
+
+`.atualizacao/` está no `.gitignore` e fora da lista de troca.
+
+### Os passos
+
+`PASSOS`, em `main.ts`, é a lista. Cada mudança de fase grava o `andamento.json` por arquivo temporário e rename.
+
+| Fase | O que faz | Se falhar |
+|---|---|---|
+| `esperar_banco` | espera `secretaria.db` e `meu.db` ficarem sem dono, até 30 s | desiste sem mudar nada e sem subir servidor: quem segura o banco segue no ar |
+| `preparar` | confere que `nova/` tem `package.json` e lista da mesma versão, que ela é maior que a instalada, que tem `node_modules/` e o CLI, e que todo caminho da lista está na lista de troca; monta o plano; conta os arquivos do núcleo mudados na máquina; apaga a `anterior/` da atualização passada | volta |
+| `copiar` | guarda o próprio `main.ts` em `.atualizacao/atualizador.ts`, grava as cópias em `antes.parcial/` e só então renomeia para `antes/` | volta |
+| `trocar` | para cada entrada do plano, leva a antiga para `anterior/` e traz a nova de `nova/` (veja A troca) | volta |
+| `instalar` | roda `instalar --json` do CLI que está na pasta, que já é o da versão nova, por até 15 min | volta |
+| `subir` | sobe `servidor --json` destacado e espera `/api/info` responder a versão nova pelo pid que ele subiu, até 60 s | encerra esse servidor e volta |
+| `desfazer` | a volta: espera o banco livre, devolve cada entrada na ordem inversa (a nova volta para `nova/`, a antiga sai de `anterior/`) e, se o `instalar` chegou a rodar, apaga os bancos e põe as cópias de `antes/` no lugar, com o wacli | o andamento fica em `desfazer`, e o próximo `abrir` termina |
+| `concluido` | fim: a versão nova está no ar | |
+| `desfeito` | fim: a versão antiga está inteira, com `falha: { passo, motivo, detalhe }` | |
+
+Depois da volta, o atualizador sobe o servidor antigo e espera ele responder a versão antiga. Os motivos são `banco_em_uso`, `versao_nova_invalida`, `copia_falhou`, `troca_falhou`, `instalar_falhou`, `servidor_nao_subiu` e `interrompida`.
+
+A volta devolve os bancos porque o código antigo recusa banco com migração que ele não conhece. Entre a cópia e a volta só o servidor da versão nova, que não chegou a responder, pôde escrever.
+
+### A troca
+
+Uma entrada da troca é uma pasta ou um arquivo que sai inteiro. `unidadeDaTroca` diz a entrada de cada caminho do pacote, pela mesma regra de `entraNaTroca`:
+
+| Caminho do pacote | Entrada |
+|---|---|
+| arquivo da raiz | o próprio arquivo |
+| `nucleo/`, `docs/`, `testes/`, `novidades/` | a pasta inteira |
+| `.agents/skills/<skill>/...` | `.agents/skills/<skill>` |
+| `.claude/settings.json` | o próprio arquivo |
+
+O plano junta as entradas da lista da versão nova, as da lista da versão instalada, `arquivos-da-versao.json` e `node_modules`, que vai primeiro. Entrada que só a versão instalada tinha sai para `anterior/` e não volta: é assim que arquivo removido some. `meu/`, `.claude/skills/`, `.agents/skills/meu-*/`, `.claude/settings.local.json`, `.git/`, arquivo solto que o vendedor criou na raiz e a pasta de dados nunca são entrada. O `andamento.json` é lido como dado de fora: plano com caminho que não é entrada torna o arquivo ilegível, e nenhum rename roda.
+
+Arquivo no lugar de arquivo troca sem buraco: a antiga é copiada para `anterior/` por um nome temporário, e a nova entra por cima, num rename só. Na volta, a nova é copiada para `nova/`, e a antiga entra por cima. Assim o `package.json` e o `entrada.ts` nunca faltam. Pasta não entra por cima de pasta: ela sai num rename e a nova entra no seguinte, e o buraco entre os dois é o que o `entrada.ts` recompõe. Entrada de `nova/` que é link recusa a troca com `troca_falhou`, mesmo que a extração já recuse link.
+
+Cada entrada guarda `tinhaAntiga` e `temNova`, o que existia antes do primeiro rename. Com isso a troca e a volta olham o que está no disco e chegam ao mesmo fim se rodarem de novo, em qualquer ponto em que a anterior tenha parado.
+
+No Windows, antivírus ou editor seguram um arquivo por instantes. O rename recusado com `EPERM`, `EBUSY` ou `EACCES` é tentado de novo depois de 100, 200, 400, 800 e 1.500 ms; depois disso a troca falha e volta. Fora do Windows não há nova tentativa.
+
+Arquivo do núcleo mudado na máquina: antes da troca, o sha256 de cada arquivo da lista da versão instalada é comparado com o do disco. A contagem e até 100 caminhos ficam em `mudados` no `andamento.json`, para o painel avisar. Arquivo apagado conta. A cópia fica em `.atualizacao/anterior/`, junto com arquivo que alguém criou dentro das pastas do núcleo, que não entra na contagem. Sem `arquivos-da-versao.json` na instalação, `mudados` é `null`.
+
+### Queda no meio
+
+`bun secretaria abrir` chama `recuperar` quando o `andamento.json` não está num fim:
+
+| Situação | O que o `abrir` faz |
+|---|---|
+| a trava está com um processo vivo | responde `atualizacao_em_andamento` |
+| um servidor responde e a fase é `preparado` | segue, sem mexer em nada: é o servidor que vai subir o atualizador |
+| um servidor responde a versão nova e a fase é `subir` | grava `concluido` e segue |
+| um servidor responde e a fase é anterior à troca | grava `desfeito`, sem mexer na pasta, e segue com esse servidor |
+| um servidor responde em qualquer outra fase | responde `servidor_preso`, sem mexer em nada: a volta só roda com o servidor parado |
+| ninguém responde e um dos bancos está em uso | responde `servidor_preso` |
+| ninguém responde e o banco está livre | desfaz, grava `desfeito` com o motivo `interrompida` (ou o da falha que já estava anotada) e sobe o servidor, que é o da versão antiga |
+| o `andamento.json` não está num formato que esta versão lê | responde `interno`, sem mexer na pasta |
+
+O atualizador também não passa por cima: com um andamento que não chegou ao fim, ele sai com `recusada`. A exceção é a fase `preparado`, que é como o servidor avisa que vai subir o atualizador (`andamentoPreparado`).
+
+Limites conhecidos:
+
+- Nas fases `instalar` e `subir`, a pasta está inteira na versão nova, e quem roda a volta é o `abrir` dela. Depois do `recuperar`, a pasta é a antiga: um import dinâmico que esse `abrir` fizesse depois resolveria contra o código antigo. Hoje ele não faz nenhum. Antiga e nova precisam ler o mesmo `andamento.json`: mudança de formato sobe o `v`, e a versão que não lê o `v` não desfaz.
+- Com o atualizador vivo entre os dois renames de uma pasta, um `bun secretaria` qualquer acha a trava presa, não recompõe nada e pode não carregar o CLI. A janela dura um rename, ou as novas tentativas do Windows, até 3 s.
+- Se o atualizador morre depois de o servidor novo responder e antes de gravar `concluido`, o fim só é gravado no `abrir` seguinte com esse servidor no ar. Um `abrir` com o servidor parado desfaria a atualização e devolveria os bancos de antes.
+- `<dados>/atualizacoes/<versão>/antes/` não é apagada: fica uma cópia dos bancos por versão.
+
+### Teste
+
+`testes/falsos/instalacao-minima.ts` monta, numa pasta temporária, a 0.1.0 instalada pelo pacote, a 0.2.0 extraída em `.atualizacao/nova/` com uma migração a mais, um `meu/` e uma pasta de dados com `secretaria.db` e `meu.db`. O `instalar` e o `servidor` dela são `testes/falsos/secretaria-minima.ts`: abrem o banco como único dono e aplicam as migrações com o `migrar` de verdade, sem painel, cofre nem wacli. Nenhum teste roda o `instalar` real, que baixaria o wacli.
+
+`nucleo/atualizador/main.test.ts` roda a máquina dentro do processo do teste, com falha injetada em cada passo pelos `Efeitos`. `testes/fluxos/atualizador.test.ts` roda o `main.ts` que veio dentro da 0.2.0 como processo, mata o atualizador em cada fase e logo depois do primeiro rename de `node_modules`, `nucleo`, `package.json` e `.claude/settings.json` na troca, e de `nucleo` na volta (`testes/falsos/atualizador-que-cai.ts`), e roda `bun run secretaria abrir` como processo na pasta da instalação. Esse comando passa pelo `package.json` e pelo `entrada.ts` que estiverem nela; o CLI dela só carrega com o `node_modules/` no lugar, e o `abrir` que ele roda é o de verdade. Em todos os casos de falha e de queda, a pasta, a `nova/` e os dois bancos ficam iguais ao que eram, arquivo por arquivo, e o servidor responde a 0.1.0.
+
+Não verificado: o rename de pasta no Windows com o servidor real recém-parado e o `bun-plugin-tailwind` carregado, o `main.ts` rodando de dentro de `nova/` no Windows, e o rename de arquivo por cima de outro no Windows. O CI do Windows roda o fluxo acima com a instalação mínima.
 
 ## Instalação
 

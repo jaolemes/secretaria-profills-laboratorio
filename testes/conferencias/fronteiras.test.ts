@@ -9,11 +9,14 @@ type Caminho = string;
 
 const EXTENSOES = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"];
 
+/** O atualizador roda sozinho enquanto o resto do núcleo muda de lugar: ele não pode importar o banco nem os processos. */
+const ATUALIZADOR = "nucleo/atualizador/main.ts";
+
 /** Onde cada API só pode aparecer. Arquivos de teste ficam de fora: eles sobem processos e revelam canários. */
 const DONOS_DE_API: readonly { readonly padrao: RegExp; readonly nome: string; readonly donos: readonly string[] }[] = [
-  { padrao: /from\s*["']bun:sqlite["']/, nome: "bun:sqlite", donos: ["nucleo/banco/"] },
+  { padrao: /from\s*["']bun:sqlite["']/, nome: "bun:sqlite", donos: ["nucleo/banco/", ATUALIZADOR] },
   { padrao: /\bBun\.spawn/, nome: "Bun.spawn", donos: ["nucleo/processos/"] },
-  { padrao: /["'](node:)?child_process["']/, nome: "node:child_process", donos: ["nucleo/processos/"] },
+  { padrao: /["'](node:)?child_process["']/, nome: "node:child_process", donos: ["nucleo/processos/", ATUALIZADOR] },
   { padrao: /\bBun\.secrets\b/, nome: "Bun.secrets", donos: ["nucleo/cofre/"] },
   { padrao: /from\s*["']imapflow["']/, nome: "imapflow", donos: ["nucleo/conectores/email/imap.ts"] },
   {

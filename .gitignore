@@ -27,3 +27,6 @@ backups
 .claude/skills/meu-*/
 .claude/settings.local.json
 .claude/worktrees/
+
+# Pasta de trabalho da atualização: a versão nova extraída, a anterior guardada e o andamento.
+.atualizacao/

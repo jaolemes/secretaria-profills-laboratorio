@@ -259,6 +259,13 @@ export const ERROS = {
     acao: "Peça ao seu agente para reiniciar a Secretária.",
     acaoDoAgente: "Rode `bun secretaria parar --forcar` e depois `bun secretaria abrir`.",
   },
+  atualizacao_em_andamento: {
+    http: null,
+    saida: 1,
+    mensagem: "A Secretária está se atualizando.",
+    acao: "Espere um minuto e peça ao seu agente para abrir a Secretária de novo.",
+    acaoDoAgente: "Espere um minuto e rode `bun secretaria abrir` de novo. Não rode `parar --forcar` nem mexa na pasta enquanto isso.",
+  },
   ambiente_invalido: {
     http: null,
     saida: 1,

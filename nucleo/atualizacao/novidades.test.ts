@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { lerNovidades } from ".";
+import { MAXIMO_DE_BYTES, lerNovidades } from ".";
 
 function arquivo(linhas: readonly string[], cabecalho = "versao: 0.2.0\ndata: 2026-11-20"): string {
   return `---\n${cabecalho}\n---\n${linhas.join("\n")}\n`;
@@ -23,6 +23,21 @@ describe("lerNovidades", () => {
   test("aceita o arquivo salvo com fim de linha do Windows", () => {
     const leitura = lerNovidades(arquivo([`- ${BOA}`]).replaceAll("\n", "\r\n"));
     expect(leitura).toEqual({ ok: true, novidades: { versao: "0.2.0", data: "2026-11-20", linhas: [BOA] } });
+  });
+
+  test("aceita o arquivo salvo com BOM pelo Bloco de Notas", () => {
+    const leitura = lerNovidades(`﻿${arquivo([`- ${BOA}`])}`);
+    expect(leitura).toEqual({ ok: true, novidades: { versao: "0.2.0", data: "2026-11-20", linhas: [BOA] } });
+  });
+
+  test("recusa o arquivo grande demais antes de ler", () => {
+    const leitura = lerNovidades(arquivo([`- ${BOA}`, "\n".repeat(MAXIMO_DE_BYTES)]));
+    expect(leitura).toEqual({ ok: false, problemas: [`o arquivo passa de ${MAXIMO_DE_BYTES} bytes`] });
+  });
+
+  test("diz que falta linha no arquivo que acaba no --- de fechamento", () => {
+    const leitura = lerNovidades("---\nversao: 0.2.0\ndata: 2026-11-20\n---");
+    expect(leitura).toEqual({ ok: false, problemas: ["precisa de pelo menos 1 linha"] });
   });
 
   test("aceita até 5 linhas e recusa a sexta", () => {

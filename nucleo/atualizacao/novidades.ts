@@ -9,6 +9,7 @@ export type LeituraDeNovidades = { readonly ok: true; readonly novidades: Novida
 
 export const MAXIMO_DE_LINHAS = 5;
 export const MAXIMO_DE_CARACTERES = 140;
+export const MAXIMO_DE_BYTES = 4096;
 export const PADRAO_DE_VERSAO = /^\d+\.\d+\.\d+$/;
 
 /** O vendedor lê estas linhas no painel: nada que só programador entende. */

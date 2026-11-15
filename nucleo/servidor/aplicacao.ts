@@ -38,7 +38,15 @@ export interface Aplicador {
    * a resposta já é `atualizando`. Com uma em curso, devolve o estado dela e não começa outra.
    */
   aplicar(cookies: string | null): Resultado<EstadoDaAtualizacao>;
+  /**
+   * Com a atualização em curso, devolve a recusa para o que se perderia no restart (gravar no CRM, sincronizar,
+   * conectar). Quem pede confere na mesma volta em que começa, sem `await` no meio: a última conferência das
+   * ocupações antes da parada não vê o que começa depois dela.
+   */
+  recusaDuranteAAtualizacao(): Resultado<never> | null;
 }
+
+const DURANTE_A_ATUALIZACAO = "A Secretária está se atualizando. Tente de novo quando ela terminar.";
 
 export interface DependenciasDoAplicador {
   readonly descoberta: Descoberta;
@@ -239,6 +247,7 @@ export function criarAplicador(deps: DependenciasDoAplicador): Aplicador {
 
   return {
     estado,
+    recusaDuranteAAtualizacao: () => (nesteProcesso?.tipo === "em_curso" ? falha("atualizacao_em_andamento", DURANTE_A_ATUALIZACAO) : null),
     aplicar(cookies) {
       const atual = estado();
       if (atual.fase === "atualizando") return ok(atual);

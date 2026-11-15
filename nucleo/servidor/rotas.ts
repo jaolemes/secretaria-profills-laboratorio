@@ -393,6 +393,8 @@ interface EmailAchado {
 }
 
 /** Ações de uma conta de e-mail. `remover` e `mudar` não são da máquina: apagam a conta ou trocam rótulo e janela. */
+/** As ações que levam a uma fase que só existe em memória (pareando, autorizando, testando) e se perderia no restart. */
+const COMECA_FASE_EM_MEMORIA: readonly string[] = ["conectar", "testar"];
 const ACOES_DA_CONTA = ["conectar", "cancelar", "testar", "desconectar", "remover", "mudar"] as const;
 type AcaoDaConta = (typeof ACOES_DA_CONTA)[number];
 
@@ -631,7 +633,7 @@ export function montarRotas(deps: DependenciasDasRotas): readonly Rota[] {
   }
 
   return [
-    ...montarRotasDeEscritas({ banco, conectores, publicador, agora: deps.agora }),
+    ...montarRotasDeEscritas({ banco, conectores, publicador, aplicador: deps.aplicador, agora: deps.agora }),
     ...montarRotasDeAtualizacao(deps.descoberta, deps.aplicador),
     {
       metodo: "GET",
@@ -714,6 +716,8 @@ export function montarRotas(deps: DependenciasDasRotas): readonly Rota[] {
         if (!corpo.ok) return respostaJson(falha(corpo.codigo), chamador);
         const entrada = lerEntrada(id, acao, corpo.valor, chamador);
         if (!entrada.ok) return respostaJson(entrada.erro, chamador);
+        const durante = COMECA_FASE_EM_MEMORIA.includes(acao) ? deps.aplicador.recusaDuranteAAtualizacao() : null;
+        if (durante !== null) return respostaJson(durante, chamador);
         const resultado = await conectores.agir(id, acao, entrada.dados);
         return respostaJson(resultado.ok ? ok(estadoPara(id, resultado.dados.estado, chamador)) : resultado, chamador);
       },
@@ -728,6 +732,8 @@ export function montarRotas(deps: DependenciasDasRotas): readonly Rota[] {
         if (!corpo.ok) return respostaJson(falha(corpo.codigo), chamador);
         const lido = corpoDeAdicionar.safeParse(corpo.valor);
         if (!lido.success) return respostaJson(falha("entrada_invalida", "Mande rotulo, provedor, endereco e senha, e servidor, porta e seguranca quando o provedor é outro."), chamador);
+        const durante = deps.aplicador.recusaDuranteAAtualizacao();
+        if (durante !== null) return respostaJson(durante, chamador);
         const resultado = await conectores.email.adicionar({ ...lido.data, senha: Segredo.de(lido.data.senha) });
         return respostaJson(resultado.ok ? ok(verConta(resultado.dados, chamador)) : resultado, chamador);
       },
@@ -766,6 +772,8 @@ export function montarRotas(deps: DependenciasDasRotas): readonly Rota[] {
         } else if (corpo.valor !== undefined) {
           return respostaJson(falha("entrada_invalida", `A ação "${acao}" não leva corpo.`), chamador);
         }
+        const durante = COMECA_FASE_EM_MEMORIA.includes(acao) ? deps.aplicador.recusaDuranteAAtualizacao() : null;
+        if (durante !== null) return respostaJson(durante, chamador);
         const resultado = await conectores.email.agir(id, acao, dados);
         return respostaJson(resultado.ok ? ok(verConta(resultado.dados, chamador)) : resultado, chamador);
       },
@@ -975,6 +983,8 @@ export function montarRotas(deps: DependenciasDasRotas): readonly Rota[] {
         if (!lido.success) {
           return respostaJson(falha("entrada_invalida", `Mande nenhum corpo, ou {"semAtendimentoHaDias": n} com n de 1 a ${SEM_ATENDIMENTO_MAXIMO_DIAS}.`), chamador);
         }
+        const durante = deps.aplicador.recusaDuranteAAtualizacao();
+        if (durante !== null) return respostaJson(durante, chamador);
         const rodada = await conectores.sincronizar(lido.data ?? {});
         return respostaJson(ok(sincronizacaoParaOLeitor(rodada, leitorDe(chamador))), chamador);
       },
@@ -985,6 +995,8 @@ export function montarRotas(deps: DependenciasDasRotas): readonly Rota[] {
       caminho: "/api/painel/aberto",
       quem: ["painel"],
       async tratar({ chamador }) {
+        const durante = deps.aplicador.recusaDuranteAAtualizacao();
+        if (durante !== null) return respostaJson(durante, chamador);
         return respostaJson(ok(await conectores.sincronizarAoAbrirOPainel()), chamador);
       },
     },
@@ -1121,6 +1133,8 @@ export function montarRotas(deps: DependenciasDasRotas): readonly Rota[] {
       caminho: "/oauth/crm/iniciar",
       quem: ["painel"],
       async tratar() {
+        const durante = deps.aplicador.recusaDuranteAAtualizacao();
+        if (durante !== null && !durante.ok) return erroEmPagina(durante.erro);
         const resultado = await conectores.agir("crm", "conectar");
         if (!resultado.ok) return erroEmPagina(resultado.erro);
         const destino = resultado.dados.urlAutorizacao;

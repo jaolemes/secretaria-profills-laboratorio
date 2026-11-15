@@ -37,6 +37,7 @@ import {
 } from "../escritas";
 import type { Publicador } from "./eventos";
 import { lerCorpo, type Chamador } from "./guarda";
+import type { Aplicador } from "./aplicacao";
 import { respostaJson, type Rota } from "./rotas";
 
 export interface DependenciasDasEscritas {
@@ -44,6 +45,7 @@ export interface DependenciasDasEscritas {
   /** Só o que as rotas usam: o teste troca `gravarNoCrm` por uma função dele. */
   readonly conectores: Pick<Conectores, "conferirCliente" | "estado" | "gravarNoCrm">;
   readonly publicador: Publicador;
+  readonly aplicador: Pick<Aplicador, "recusaDuranteAAtualizacao">;
   agora(): Instante;
 }
 
@@ -174,7 +176,7 @@ export function montarRotasDeEscritas(deps: DependenciasDasEscritas): readonly R
    */
   function gravarOQueFoiAprovado(id: string, pedido: ComandoDaEscrita & { readonly acao: "aprovar" | "tentar_de_novo" }, chamador: Chamador): Promise<Resultado<CartaoVisto>> {
     return emSerie(async () => {
-      const fechado = portaoDoCrm();
+      const fechado = portaoDoCrm() ?? deps.aplicador.recusaDuranteAAtualizacao();
       if (fechado !== null) return fechado;
       const feito = mudarCartaoEmSequencia(
         banco,

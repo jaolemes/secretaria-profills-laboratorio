@@ -1264,11 +1264,24 @@ A volta devolve os bancos porque o código antigo recusa banco com migração qu
 
 ### O processo anotado
 
-O `instalar` e o servidor da versão nova são processos à parte, e seguem vivos se o atualizador morrer. Por isso o andamento leva `processo: { papel, pid, inicio }`, com `papel` `instalar` ou `servidor`, enquanto um deles pode estar vivo, e `null` no resto do tempo. `inicio` é a hora de início que o sistema dá ao pid, lida como em `servidor.pid` (seção "Vida do servidor"): o sistema reaproveita pid, e só os dois juntos dizem que o processo é o mesmo. Hora que não dá para ler conta como a mesma.
+O `instalar` e o servidor da versão nova são processos à parte, e seguem vivos se o atualizador morrer. Por isso o andamento leva `processo: { papel, pid, inicio }`, com `papel` `instalar` ou `servidor`, enquanto um deles pode estar vivo, e `null` no resto do tempo. `inicio` é a hora de início que o sistema dá ao pid, lida como em `servidor.pid` (seção "Vida do servidor"): o sistema reaproveita pid, e só os dois juntos dizem que o processo é o mesmo.
 
-O pid é gravado logo depois de o processo nascer, com `inicio: null`, e regravado com a hora: no Windows, ler a hora leva perto de um segundo. O campo é o único acréscimo ao `andamento.json`. O `v` segue 1: a versão que não conhece o campo o ignora, e o arquivo sem o campo é lido como `processo: null`.
+A volta pergunta quem tem o pid hoje (`estadoDoProcesso`), e só encerra o processo `nosso`:
 
-A volta só renomeia pasta e devolve banco sem o processo anotado vivo. Ela o encerra à força, com os processos que ele subiu: fora do Windows o `instalar` e o servidor nascem líderes de um grupo, e o sinal vai para o grupo; no Windows é `taskkill /T /F`. O prazo do `instalar` encerra do mesmo jeito. Encerrar o `instalar` no meio é seguro porque a volta devolve os bancos e o wacli de `antes/`. Se o processo não encerra, a volta para sem mexer em nada, com o andamento em `desfazer` e o processo ainda anotado.
+| O que o sistema diz do pid | Estado |
+|---|---|
+| não existe | `nenhum` |
+| a hora de agora bate com o `inicio` anotado | `nosso` |
+| a hora de agora é outra | `nenhum`: o pid é de outro processo |
+| `inicio` é `null`, e o processo do pid nasceu entre `iniciadoEm` e `atualizadoEm`, com 2 s de folga | `nosso` |
+| `inicio` é `null`, e o processo nasceu fora dessa janela | `nenhum`: é o caso do pid reaproveitado depois de reiniciar o computador |
+| a hora não dá para ler (powershell barrado, `ps` ausente, processo de outro usuário no Windows) | `incerto` até o prazo do papel contado de `atualizadoEm` (15 min do `instalar`, 60 s do servidor), `nenhum` depois |
+
+Com o `incerto`, ninguém é encerrado: o `abrir` responde `atualizacao_em_andamento`, e a pasta fica como está. Passado o prazo, o atualizador já teria encerrado o processo dele, e a volta segue sem encerrar ninguém, com o lock do banco como última guarda. O `atualizadoEm` só é regravado com o processo anotado enquanto o atualizador o segura, e aí o sistema não dá o pid a outro: a janela não alcança um processo alheio. `msDoInicio` lê a hora de cada sistema em milissegundos: no Linux, `btime` de `/proc/stat` mais o `starttime` em tiques de 1/100 s; no macOS, o `lstart`; no Windows, os ticks UTC.
+
+O pid é gravado logo depois de o processo nascer, com `inicio: null`, e regravado com a hora: no Windows, ler a hora leva perto de um segundo. Se o atualizador morre nesse segundo, a janela de nascimento acima confirma o processo. O campo é o único acréscimo ao `andamento.json`. O `v` segue 1: a versão que não conhece o campo o ignora, e o arquivo sem o campo é lido como `processo: null`.
+
+A volta só renomeia pasta e devolve banco sem o processo anotado vivo. O atualizador vivo decide pelo processo que ele ainda segura, não pelo pid: o `instalar` que saiu sozinho sai do andamento sem ser encerrado, e o que passou do prazo é encerrado mesmo sem a hora lida. A volta do `abrir` encerra o processo `nosso` à força, com os processos que ele subiu: fora do Windows o `instalar` e o servidor nascem líderes de um grupo, e o sinal vai para o grupo; no Windows é `taskkill /T /F`. O prazo do `instalar` encerra do mesmo jeito. Encerrar o `instalar` no meio é seguro porque a volta devolve os bancos e o wacli de `antes/`. Se o processo não encerra, a volta para sem mexer em nada, com o andamento em `desfazer` e o processo ainda anotado.
 
 A saída do `instalar` vai para `instalar-saida.log`, e não para um pipe: um processo que ele subisse e que herdasse o pipe seguraria a leitura aberta depois de ele sair.
 
@@ -1306,6 +1319,7 @@ Arquivo do núcleo mudado na máquina: antes da troca, o sha256 de cada arquivo 
 | um servidor responde em qualquer outra fase | responde `servidor_preso`, sem mexer em nada: a volta só roda com o servidor parado |
 | ninguém responde, a fase é `subir` e o servidor anotado vive | espera ele responder a versão nova, até 60 s, e grava `concluido`; se ele morre ou o prazo acaba, encerra o que sobrou e segue para a volta |
 | ninguém responde e o `instalar` anotado vive | encerra o `instalar`, com os processos que ele subiu, e segue para a volta |
+| o pid anotado existe e não dá para confirmar que é o processo da atualização | responde `atualizacao_em_andamento`, sem encerrar nem mexer em nada, até o prazo do papel; depois segue para a volta |
 | o processo anotado vive e não encerra | responde `banco_preso_por_outro`, com o papel e o pid na mensagem, sem mexer em nada: a saída é reiniciar o computador |
 | ninguém responde e um dos bancos segue em uso por 10 s | responde `servidor_preso`. A espera existe porque o Windows solta o lock depois que o processo morto some |
 | ninguém responde e o banco está livre | desfaz, grava `desfeito` com o motivo `interrompida` (ou o da falha que já estava anotada) e sobe o servidor, que é o da versão antiga |
@@ -1317,7 +1331,7 @@ Limites conhecidos:
 
 - Nas fases `instalar` e `subir`, a pasta está inteira na versão nova, e quem roda a volta é o `abrir` dela. Depois do `recuperar`, a pasta é a antiga: um import dinâmico que esse `abrir` fizesse depois resolveria contra o código antigo. Hoje ele não faz nenhum. Antiga e nova precisam ler o mesmo `andamento.json`: mudança de formato sobe o `v`, e a versão que não lê o `v` não desfaz.
 - Com o atualizador vivo entre os dois renames de uma pasta, um `bun secretaria` qualquer acha a trava presa, não recompõe nada e pode não carregar o CLI: a resposta é o `atualizacao_em_andamento` do `entrada.ts`. A janela dura um rename, ou as novas tentativas do Windows, até 3 s.
-- O atualizador que morre entre subir o processo e gravar o pid dele deixa um processo vivo que o andamento não cita. Não há espera entre as duas coisas. Se morre antes de regravar a hora de início, o processo fica anotado só pelo pid.
+- O atualizador que morre entre subir o processo e gravar o pid dele deixa um processo vivo que o andamento não cita. Não há espera entre as duas coisas. Se morre antes de regravar a hora de início, o processo fica anotado só pelo pid, e a volta o confirma pela hora em que ele nasceu.
 - O que o `instalar` subiu e sobrou depois de ele sair sozinho não é encerrado: a volta só alcança os filhos de um `instalar` ainda vivo.
 - Se o atualizador morre depois de o servidor novo responder e antes de gravar `concluido`, o fim só é gravado no `abrir` seguinte com esse servidor no ar. Um `abrir` com o servidor parado desfaria a atualização e devolveria os bancos de antes.
 - `<dados>/atualizacoes/<versão>/antes/` não é apagada: fica uma cópia dos bancos por versão.

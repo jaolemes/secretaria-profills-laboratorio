@@ -32,7 +32,7 @@ import {
   type VisaoDaContaEmail,
   type VisaoDoEmail,
 } from "../dominio";
-import type { EstadoDaAtualizacao, Impedimento, VersaoPublicada } from "../atualizacao";
+import type { EstadoDaAtualizacao, Impedimento, PassoDaAplicacao, VersaoPublicada } from "../atualizacao";
 import { haAtualizacaoPendente, recuperar } from "../atualizador";
 import type { ResultadoDaFonte, Sincronizacao } from "../conectores";
 import { ESTADOS_DA_ESCRITA, TOOLS_DE_ESCRITA, type CartaoVisto, type ResumoDaEscrita, type ToolDeEscrita } from "../escritas";
@@ -924,8 +924,29 @@ const FRASE_DO_IMPEDIMENTO: { readonly [I in Impedimento]: (nova: VersaoPublicad
   bun_antigo: (nova) => `Esta versão pede o Bun ${nova.bunMinimo} ou mais novo, e esta máquina tem o ${Bun.version}.`,
 };
 
+const PASSO_EM_PALAVRAS: { readonly [P in PassoDaAplicacao]: string } = {
+  baixando: "baixando e conferindo a versão nova",
+  instalando: "instalando as dependências da versão nova",
+  reiniciando: "reiniciando para trocar de versão",
+};
+
 function descreverAtualizacao(estado: EstadoDaAtualizacao): string {
   switch (estado.fase) {
+    case "atualizando":
+      return `A Secretária está se atualizando da ${estado.instalada} para a ${estado.para}: ${PASSO_EM_PALAVRAS[estado.passo]}. O painel volta sozinho; se não voltar em 3 minutos, rode \`bun secretaria abrir\`.`;
+    case "atualizado":
+      return [
+        `Atualizada da ${estado.de ?? "versão anterior"} para a ${estado.instalada} em ${estado.em}.`,
+        ...(estado.nucleoMudado !== null && estado.nucleoMudado > 0
+          ? [`${estado.nucleoMudado} arquivo(s) do núcleo tinham sido mudados nesta máquina e saíram do ar; a cópia ficou guardada. Refaça a mudança em meu/ se o vendedor ainda quiser.`]
+          : []),
+        "Esta conversa ainda usa as regras e as skills da versão de antes: abra uma conversa nova para usar as da versão nova.",
+      ].join("\n");
+    case "falhou":
+      return [
+        `Não deu para atualizar${estado.para === null ? "" : ` para a ${estado.para}`} (${estado.motivo}, em ${estado.em}): ${estado.explicacao} A Secretária continua na ${estado.instalada} e funciona normalmente.`,
+        ...(estado.bloqueio === null ? [] : [estado.bloqueio.explicacao]),
+      ].join("\n");
     case "nao_conferida":
       return `Versão ${estado.instalada}. A Secretária ainda não conferiu se há versão nova: rode \`bun secretaria atualizacao conferir\`.`;
     case "em_dia":
@@ -937,7 +958,11 @@ function descreverAtualizacao(estado: EstadoDaAtualizacao): string {
         `Tem versão nova: ${estado.nova.versao}, de ${estado.nova.data}. A instalada é a ${estado.instalada}.`,
         "O que muda:",
         ...estado.nova.oQueMuda.map((frase) => `- ${frase}`),
-        estado.impedimento === null ? "Atualizar pelo painel ainda não existe nesta versão da Secretária." : FRASE_DO_IMPEDIMENTO[estado.impedimento](estado.nova),
+        estado.impedimento !== null
+          ? FRASE_DO_IMPEDIMENTO[estado.impedimento](estado.nova)
+          : estado.bloqueio !== null
+            ? `Agora não dá para atualizar: ${estado.bloqueio.explicacao}`
+            : "Atualizar pelo painel ainda não existe nesta versão da Secretária.",
       ].join("\n");
   }
 }

@@ -5,6 +5,7 @@ import { release } from "node:os";
 import { join } from "node:path";
 import pacote from "../../package.json";
 import { caminhosDosDados, fecharPastaDeDados, type Ambiente } from "../ambiente";
+import { juntarEstado } from "../atualizacao";
 import { backupDoDia, definirBackendDoCofre, garantirInstalacao, prepararBanco, type BancoAberto } from "../banco";
 import { PRAZO_DO_COFRE_MS, abrirCofre, comPrazo, escolherBackend, sondarCofreDoSistema, type Cofre } from "../cofre";
 import { criarConectores, type Conectores } from "../conectores";
@@ -205,7 +206,7 @@ export async function iniciarServidor(ambiente: Ambiente, opcoes: OpcoesDoServid
           })),
         },
         backup,
-        atualizacao: atualizacaoNoDiagnostico(descoberta.estado()),
+        atualizacao: atualizacaoNoDiagnostico(juntarEstado(descoberta.estado(), { tipo: "nenhuma" }, []), descoberta.estado()),
         travas: lerTravas(ambiente.dirRepo),
         sistema: lerSistema(),
       };

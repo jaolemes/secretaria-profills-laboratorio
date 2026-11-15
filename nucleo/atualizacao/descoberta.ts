@@ -70,7 +70,8 @@ export function deveBuscar(ultima: Conferencia | null, agora: Instante): boolean
 /** Por que a versão nova não se aplica nesta máquina, mesmo com o botão um dia no painel. */
 export type Impedimento = "instalacao_de_desenvolvimento" | "bun_antigo";
 
-export type EstadoDaAtualizacao =
+/** O que a última conferência diz. O estado que a API entrega junta a ele a atualização em curso (`juntarEstado`). */
+export type EstadoDaDescoberta =
   | { readonly fase: "nao_conferida"; readonly instalada: string }
   | { readonly fase: "em_dia"; readonly instalada: string; readonly conferidaEm: Instante }
   | {
@@ -93,7 +94,7 @@ export interface InstalacaoAtual {
  * O estado sai da última conferência e da instalação de agora, nunca de um estado guardado: depois
  * de atualizar, a versão guardada deixa de ser maior e o estado volta a `em_dia` sem outra busca.
  */
-export function estadoDaAtualizacao(ultima: Conferencia | null, instalacao: InstalacaoAtual): EstadoDaAtualizacao {
+export function estadoDaAtualizacao(ultima: Conferencia | null, instalacao: InstalacaoAtual): EstadoDaDescoberta {
   const { instalada } = instalacao;
   if (ultima === null) return { fase: "nao_conferida", instalada };
   const { em, resultado } = ultima;

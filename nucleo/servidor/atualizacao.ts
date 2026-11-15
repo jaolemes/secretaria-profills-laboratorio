@@ -8,13 +8,16 @@ import {
   TETO_DO_ENVELOPE_BYTES,
   deveBuscar,
   estadoDaAtualizacao,
+  juntarEstado,
   lerConferenciaGuardada,
   lerResposta,
   type ChavePublica,
   type Conferencia,
   type EstadoDaAtualizacao,
+  type EstadoDaDescoberta,
   type Impedimento,
   type RespostaDaBusca,
+  type VersaoPublicada,
 } from "../atualizacao";
 import { gravarConferenciaDeVersao, lerConferenciaDeVersao, type BancoAberto } from "../banco";
 import { detalheComoDado, falha, ok, textoExterno, type Instante, type Resultado } from "../dominio";
@@ -33,11 +36,11 @@ export const FONTE_DAS_VERSOES: FonteDasVersoes = { endereco: new URL(ENDERECO_D
 
 export interface Descoberta {
   /** O estado da última conferência, sem buscar. */
-  estado(): EstadoDaAtualizacao;
+  estado(): EstadoDaDescoberta;
   /** O painel abriu: busca só quando `deveBuscar` manda. */
-  aoAbrirOPainel(): Promise<EstadoDaAtualizacao>;
+  aoAbrirOPainel(): Promise<EstadoDaDescoberta>;
   /** Busca agora. Dois pedidos ao mesmo tempo dividem a mesma busca. */
-  conferir(): Promise<EstadoDaAtualizacao>;
+  conferir(): Promise<EstadoDaDescoberta>;
   /** Segundos que o agente ainda espera para pedir outra conferência; 0 quando pode. */
   esperaDoAgenteS(): number;
 }
@@ -91,8 +94,8 @@ export function criarDescoberta(deps: {
   };
   const estado = () => estadoDaAtualizacao(ultima(), instalacao);
 
-  let emCurso: Promise<EstadoDaAtualizacao> | null = null;
-  const conferir = (): Promise<EstadoDaAtualizacao> => {
+  let emCurso: Promise<EstadoDaDescoberta> | null = null;
+  const conferir = (): Promise<EstadoDaDescoberta> => {
     emCurso ??= (async () => {
       try {
         const em = deps.agora();
@@ -122,17 +125,22 @@ export function criarDescoberta(deps: {
 }
 
 /** O O que muda chega ao agente como dado citado: veio da rede, mesmo assinado. */
-function estadoPara(estado: EstadoDaAtualizacao, chamador: Chamador): EstadoDaAtualizacao {
-  if (chamador !== "agente" || estado.fase !== "versao_nova") return estado;
-  return { ...estado, nova: { ...estado.nova, oQueMuda: estado.nova.oQueMuda.map((frase) => detalheComoDado(textoExterno(frase))) } };
+export function estadoPara(estado: EstadoDaAtualizacao, chamador: Chamador): EstadoDaAtualizacao {
+  if (chamador !== "agente") return estado;
+  const citada = (nova: VersaoPublicada): VersaoPublicada => ({ ...nova, oQueMuda: nova.oQueMuda.map((frase) => detalheComoDado(textoExterno(frase))) });
+  if (estado.fase === "versao_nova") return { ...estado, nova: citada(estado.nova) };
+  if (estado.fase === "falhou" && estado.nova !== null) return { ...estado, nova: citada(estado.nova) };
+  return estado;
 }
 
-export function atualizacaoNoDiagnostico(estado: EstadoDaAtualizacao): AtualizacaoNoDiagnostico {
+/** A fase é a do estado inteiro; a hora da última conferência e o impedimento são os da descoberta. */
+export function atualizacaoNoDiagnostico(estado: EstadoDaAtualizacao, descoberta: EstadoDaDescoberta): AtualizacaoNoDiagnostico {
+  const versaoNova = estado.fase === "versao_nova" ? estado.nova.versao : estado.fase === "atualizando" || estado.fase === "falhou" ? estado.para : null;
   return {
     fase: estado.fase,
-    versaoNova: estado.fase === "versao_nova" ? estado.nova.versao : null,
-    impedimento: estado.fase === "versao_nova" ? estado.impedimento : null,
-    ultimaConferencia: estado.fase === "em_dia" || estado.fase === "versao_nova" ? estado.conferidaEm : estado.fase === "sem_internet" ? estado.tentadaEm : null,
+    versaoNova,
+    impedimento: descoberta.fase === "versao_nova" ? descoberta.impedimento : null,
+    ultimaConferencia: descoberta.fase === "em_dia" || descoberta.fase === "versao_nova" ? descoberta.conferidaEm : descoberta.fase === "sem_internet" ? descoberta.tentadaEm : null,
   };
 }
 
@@ -150,7 +158,7 @@ export function montarRotasDeAtualizacao(descoberta: Descoberta): readonly Rota[
       quem: ["painel", "agente"],
       async tratar({ chamador }) {
         const estado = chamador === "painel" ? await descoberta.aoAbrirOPainel() : descoberta.estado();
-        return respostaJson(ok(estadoPara(estado, chamador)), chamador);
+        return respostaJson(ok(estadoPara(juntarEstado(estado, { tipo: "nenhuma" }, []), chamador)), chamador);
       },
     },
     {
@@ -160,7 +168,7 @@ export function montarRotasDeAtualizacao(descoberta: Descoberta): readonly Rota[
       async tratar({ chamador }) {
         const espera = chamador === "agente" ? descoberta.esperaDoAgenteS() : 0;
         if (espera > 0) return respostaJson(cedoDemais(espera), chamador);
-        return respostaJson(ok(estadoPara(await descoberta.conferir(), chamador)), chamador);
+        return respostaJson(ok(estadoPara(juntarEstado(await descoberta.conferir(), { tipo: "nenhuma" }, []), chamador)), chamador);
       },
     },
   ];

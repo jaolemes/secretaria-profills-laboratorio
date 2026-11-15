@@ -1,3 +1,4 @@
+export * from "./aplicacao";
 export * from "./chaves";
 export * from "./descoberta";
 export * from "./envelope";

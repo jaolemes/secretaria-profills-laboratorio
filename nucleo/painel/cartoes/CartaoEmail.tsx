@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { LIMITE_DE_CONTAS_DE_EMAIL, type ErroOperacao, type IdContaEmail, type VisaoDaContaEmail, type VisaoDoEmail } from "../../dominio";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { NOMES_DOS_CONECTORES } from "../descrever";
 import { SELO_DA_CONTA, contagemDasContas, podeAdicionar, situacaoDoCartao } from "../email";
 import { hashDaRota, type GavetaDoEmail as GavetaDaRota } from "../rota";

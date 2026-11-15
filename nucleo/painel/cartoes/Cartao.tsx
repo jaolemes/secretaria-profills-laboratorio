@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { ROTULOS_DAS_ACOES, type Acao, type ErroOperacao, type Instante } from "../../dominio";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { SELO_DO_TOM, type Descricao, type Tom } from "../descrever";
 import { restante } from "../tempo";
 

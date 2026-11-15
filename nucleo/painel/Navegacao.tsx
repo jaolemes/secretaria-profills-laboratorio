@@ -20,7 +20,7 @@ import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import type { Tom } from "./descrever";
 import type { ConexoesDaLateral, LinhaDoMenu, ModeloDoMenu } from "./lateral";
 import type { IdDoBloco } from "./meu-dia";

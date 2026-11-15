@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { hashDaRota } from "../rota";
 import { lerNovaTarefa } from "../tarefas";
 import { AvisoFlutuante, CabecalhoDaTela, ErroDeCarga, MetaDaTarefa, api, useCarga, useExecutor, type Executor } from "./comum";

@@ -4,7 +4,7 @@ import { chaveDoItem, type CanalDeVinculo, type ClienteSemAtendimento, type Comp
 import type { MeuDia as DadosDoDia, Tarefa } from "../../tarefas";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import {
   SINCRONIZACAO_PARADA,
   alvoDoIgnorado,

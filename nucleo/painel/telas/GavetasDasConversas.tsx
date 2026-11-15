@@ -4,7 +4,7 @@ import type { CanalDeVinculo, ErroOperacao, ItemDeEsperando, ItemDeResponder, It
 import { chaveDoItem } from "../../dominio";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { AlertaDeErro, Selo } from "../cartoes/Cartao";
 import { CLASSE_DA_GAVETA, Cabecalho, Corpo, Rodape } from "../cartoes/GavetaDoEmail";
 import {

@@ -1,7 +1,7 @@
 import { CircleCheck } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CONECTORES_UNICOS, type ErroOperacao, type EstadoPainel, type Fase, type IdConectorUnico } from "../../dominio";
-import { cn } from "@/lib/utils";
+import { cn } from "cn";
 import { pedirAcao, type PedidoDeAcao } from "../api";
 import { CartaoCrm } from "../cartoes/CartaoCrm";
 import { CartaoEmail, GavetaDoEmail } from "../cartoes/CartaoEmail";

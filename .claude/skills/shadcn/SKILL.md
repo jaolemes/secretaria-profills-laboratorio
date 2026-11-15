@@ -8,7 +8,7 @@ user-invocable: false
 
 A framework for building ui, components and design systems. Components are added as source code to the user's project via the CLI.
 
-> **IMPORTANT:** In this repository, run every CLI command as `bunx --bun shadcn`. It runs the CLI version pinned in `package.json`, which the installer puts in `node_modules`, so the CLI itself is never downloaded at run time. Never add `@latest` or a version to the command, and never use `npx` or `pnpm dlx`. Registry components may import `cn` from the `cn` package. Change that import to `@/lib/utils` and keep `cn` out of `package.json`.
+> **IMPORTANT:** In this repository, run every CLI command as `bunx --bun shadcn`. It runs the CLI version pinned in `package.json`, which the installer puts in `node_modules`, so the CLI itself is never downloaded at run time. Never add `@latest` or a version to the command, and never use `npx` or `pnpm dlx`. Components import `cn` from the `cn` package, which `package.json` pins. Keep that import as the CLI writes it.
 
 ## Current Project Context
 

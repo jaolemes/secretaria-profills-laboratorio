@@ -14,7 +14,8 @@ export const PADRAO_DE_VERSAO = /^\d+\.\d+\.\d+$/;
 /** O vendedor lê estas linhas no painel: nada que só programador entende. */
 const PROIBIDO_NA_LINHA: readonly { readonly padrao: RegExp; readonly motivo: string }[] = [
   { padrao: /`/, motivo: "tem crase" },
-  { padrao: /https?:\/\/|www\.|\]\(/i, motivo: "tem link" },
+  { padrao: /[a-z][a-z\d+.-]*:[^\s]|www\.|\]\(/i, motivo: "tem link" },
+  { padrao: /[<>]/, motivo: "tem HTML" },
   { padrao: /\b[\w-]+\.(ts|tsx|js|md|json|sh|ps1|db|sql|yml|yaml|toml|lock|exe)\b/i, motivo: "tem nome de arquivo" },
   { padrao: /[a-z_.-]\/[a-z_.-]/i, motivo: "tem caminho de pasta" },
   { padrao: /\b(bun|bunx|git|npm|npx|wacli)\s+[a-z]/i, motivo: "tem comando" },

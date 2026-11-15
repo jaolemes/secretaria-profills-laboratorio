@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { caminhosDosDados } from "../../nucleo/ambiente";
 import { definirBackendDoCofre } from "../../nucleo/banco";
 import type { EstadoAgente, EstadoPainel } from "../../nucleo/dominio";
-import { iniciarServidor, lerArquivoDoServidor, type ArquivoDoServidor, type ServidorRodando } from "../../nucleo/servidor";
+import { iniciarServidor, lerArquivoDoServidor, type ArquivoDoServidor, type FonteDasVersoes, type ServidorRodando } from "../../nucleo/servidor";
 import { montarBancada, type Alvos, type Bancada } from "../falsos/bancada";
 import type { LeiturasDoWacliFalso, PassoDoWacliFalso } from "../falsos/wacli";
 
@@ -152,10 +152,14 @@ function lerEventos<E>(resposta: Response, guardar: string[]): Eventos<E> {
 export interface OpcoesDoPalco {
   /** A sincronização dos dois momentos do vendedor. Desligada no palco: só o teste dela liga. */
   readonly sincronizacaoAutomatica?: boolean;
+  /** Onde o servidor confere a última versão. Sem ela, um endereço morto: o palco nunca fala com o GitHub. */
+  readonly versoes?: FonteDasVersoes;
 }
 
+const SEM_RELEASE: FonteDasVersoes = { endereco: new URL("http://127.0.0.1:9/versao.json"), chaves: [], prazoMs: 300 };
+
 export async function subirPalco(alvos: Alvos = {}, opcoes: OpcoesDoPalco = {}): Promise<Palco> {
-  const doServidor = { sincronizacaoAutomatica: opcoes.sincronizacaoAutomatica ?? false };
+  const doServidor = { sincronizacaoAutomatica: opcoes.sincronizacaoAutomatica ?? false, versoes: opcoes.versoes ?? SEM_RELEASE };
   const bancada = montarBancada({ ...alvos, porta: 0 });
   // O cofre do teste é sempre o arquivo: o servidor nunca toca o chaveiro de quem roda o teste.
   definirBackendDoCofre(bancada.banco, "arquivo");

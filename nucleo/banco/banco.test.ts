@@ -69,6 +69,7 @@ describe("migrações", () => {
       "0011_fila_de_aprovacao",
       "0012_decisao_so_insercao",
       "0013_nome_de_quem_usa",
+      "0014_conferencia_de_versao",
     ]);
     expect(banco.sqlite.query("SELECT id FROM conector ORDER BY id").all()).toEqual(
       [...CONECTORES_UNICOS].sort().map((id) => ({ id })),

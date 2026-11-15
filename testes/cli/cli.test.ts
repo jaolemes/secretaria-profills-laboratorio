@@ -119,7 +119,7 @@ describe("CLI com o servidor parado", () => {
     expect(saida.codigo).toBe(0);
     expect(saida.envelope?.ok).toBe(true);
     const usos = (saida.envelope?.dados as { uso: string }[]).map((item) => item.uso.split(" ")[2]);
-    expect(usos).toEqual(["servidor", "abrir", "parar", "status", "esperar", "email", "conector", "diagnostico", "tarefa", "escrita", "sincronizar", "relatorio", "meu-dia", "ignorar", "wa", "instalar", "ajuda"]);
+    expect(usos).toEqual(["servidor", "abrir", "parar", "status", "esperar", "email", "conector", "diagnostico", "atualizacao", "tarefa", "escrita", "sincronizar", "relatorio", "meu-dia", "ignorar", "wa", "instalar", "ajuda"]);
   });
 
   test.each([

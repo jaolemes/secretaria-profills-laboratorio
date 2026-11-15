@@ -28,6 +28,8 @@ export interface Alvos {
   readonly crmClientId?: URL | null;
   readonly caExtra?: string | null;
   readonly porta?: number;
+  /** A pasta da Secretária. Sem ela, é o próprio repo. */
+  readonly dirRepo?: string;
 }
 
 export interface Bancada {
@@ -71,7 +73,7 @@ export function abrirOBanco(dirDados: string, dirVazio: string, agora: Instante)
 export function montarAmbiente(dirDados: string, dirFalso: string, alvos: Alvos, agora: () => Instante): Ambiente {
   return {
     plataforma: process.platform,
-    dirRepo: REPO,
+    dirRepo: alvos.dirRepo ?? REPO,
     dirDados,
     porta: alvos.porta ?? 47_115,
     wacli: [process.execPath, WACLI_FALSO, `--falso=${dirFalso}`],

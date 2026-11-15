@@ -953,7 +953,7 @@ data: 2026-11-14
 
 ## Pacote da versão e assinatura
 
-Cada versão marcada sai como dois arquivos anexados à release do GitHub: `secretaria-<versão>.tar.gz`, o pacote, e `versao.json`, o manifesto assinado. O código que monta, assina, confere e extrai mora em `nucleo/atualizacao` e usa só o Bun, sem pacote do npm: o passo que assina roda sem `bun install`. `testes/conferencias/release.test.ts` reprova um import de fora nesse módulo. Nesta versão nada disso aparece no painel nem baixa nada: o servidor ainda não chama essas funções.
+Cada versão marcada sai como dois arquivos anexados à release do GitHub: `secretaria-<versão>.tar.gz`, o pacote, e `versao.json`, o manifesto assinado. O código que monta, assina, confere e extrai mora em `nucleo/atualizacao` e usa só o Bun, sem pacote do npm: o passo que assina roda sem `bun install`. `testes/conferencias/release.test.ts` reprova um import de fora nesse módulo. Nesta versão o servidor só confere o `versao.json` (seção "Descoberta de versão nova"): nada aparece no painel, e o pacote não é baixado.
 
 ### O `versao.json`
 
@@ -1051,6 +1051,59 @@ Para publicar uma versão, o PR da versão sobe o `version` do `package.json` e 
 A tag `vX.Y.Z-teste` publica uma release de teste: sai marcada como pré-release, o endereço da última versão não a enxerga, e o manifesto dela aponta para a própria tag, que nenhuma instalação aceita (`endereco_fora_do_canonico`). Ela serve para ver o workflow rodar nos três sistemas, e também precisa da aprovação e da chave.
 
 Não verificado: o workflow ainda não rodou no GitHub. A montagem, a conferência, a assinatura com chave de teste e o `bun install` e o `tipos` na pasta extraída rodaram no Linux, pelos testes e pelo comando.
+
+## Descoberta de versão nova
+
+O servidor confere se há versão nova buscando o `versao.json` em `ENDERECO_DA_ULTIMA_VERSAO`. Quem busca é o servidor, nunca o navegador: a CSP do painel fica como está. Aplicar a versão nova ainda não existe, e nada disso aparece no painel.
+
+### Quando busca
+
+Nenhum temporizador busca. A busca acontece em três momentos:
+
+| Pedido | Busca |
+|---|---|
+| `GET /api/atualizacao` do painel | quando a última conferência tem 6 horas ou mais, ficou sem resposta, ou nunca houve; senão devolve a guardada |
+| `POST /api/atualizacao/conferir` do painel | sempre: é o "Tentar agora" |
+| `POST /api/atualizacao/conferir` do agente (`bun secretaria atualizacao conferir`) | quando a última busca começou há 30 segundos ou mais; antes disso, `conferir_cedo_demais` (429) com `erro.esperaS` |
+
+`GET /api/atualizacao` do agente (`bun secretaria atualizacao`) nunca busca. Dois pedidos ao mesmo tempo dividem a mesma busca. A busca tem prazo de 5 s, corpo incluído, e lê no máximo 64 KiB mais um byte: corpo maior é recusado como `envelope_invalido`.
+
+A hora e o resultado da última busca ficam na tabela `conferencia_de_versao`, de uma linha só (migração `0014`), para o restart não buscar de novo antes das 6 horas. Linha que esta versão não entende conta como nunca conferida.
+
+### Resultado da busca e estado
+
+`lerResposta` (`nucleo/atualizacao/descoberta.ts`, sem I/O além da assinatura) transforma a resposta num resultado, e `estadoDaAtualizacao` transforma o resultado guardado e a instalação de agora no estado que a API entrega. O estado nunca é guardado: depois de atualizar, a versão guardada deixa de ser maior e o estado volta a `em_dia` sem outra busca.
+
+| Resposta | Resultado guardado | Estado | Registro |
+|---|---|---|---|
+| 200, assinatura confere e versão maior | `versao_nova` | `versao_nova` | nada |
+| 200, versão igual ou menor | `nada_novo` | `em_dia` | nada |
+| 200, qualquer outra recusa de `conferirVersaoPublicada` | `nada_novo` | `em_dia` | aviso `atualizacao.busca_com_aviso` com o motivo |
+| 404 | `nada_novo` | `em_dia` | aviso com `sem_versao_publicada` |
+| 403 ou 429 | `recusada_pelo_github` | `sem_internet` | aviso com `http_403` ou `http_429` |
+| outro status | `sem_resposta` | `sem_internet` | aviso com `http_<status>` |
+| rede fora ou prazo vencido | `sem_resposta` | `sem_internet` | nada |
+
+Sem nenhuma busca guardada, o estado é `nao_conferida`. Sem internet é estado, não erro: a resposta é 200 e o resto da Secretária segue igual. Depois de `sem_resposta`, a abertura seguinte do painel já tenta de novo; depois de `recusada_pelo_github`, só depois das 6 horas.
+
+O 404 conta como "nada novo", e não como sem internet: medido em 14 de novembro de 2026, `curl -sI` no endereço da última versão responde `404` porque o repo ainda não tem release, e sem cabeçalho `x-ratelimit`. Sem essa regra, toda instalação diria "sem internet" até a primeira versão sair. O limite de 60 por hora da API do GitHub não aparece nesse endereço; o `302` com release publicada não foi medido.
+
+### Os estados
+
+| Fase | Campos |
+|---|---|
+| `nao_conferida` | `instalada` |
+| `em_dia` | `instalada`, `conferidaEm` |
+| `versao_nova` | `instalada`, `conferidaEm`, `nova` (`versao`, `data`, `bunMinimo`, `oQueMuda`) e `impedimento` |
+| `sem_internet` | `instalada`, `tentadaEm` |
+
+`impedimento` diz por que a versão nova não se aplica nesta máquina: `instalacao_de_desenvolvimento` quando a pasta tem `.git` (a pasta de desenvolvimento nunca se atualiza pelo painel, e quem instalou por `git clone` reinstala uma vez pelo script), `bun_antigo` quando o `bunMinimo` do manifesto é maior que o Bun que roda o servidor, e `null` quando nada impede. Os estados `atualizando`, `atualizado` e `falhou` chegam com o aplicar.
+
+O agente recebe cada frase de `oQueMuda` citada como dado, com `detalheComoDado`: o texto veio da rede, mesmo assinado. O painel recebe as frases como estão. O `diagnostico` leva só `atualizacao: { fase, versaoNova, impedimento, ultimaConferencia }`, sem o O que muda.
+
+### Teste
+
+`testes/falsos/release.ts` é a release falsa: serve o `versao.json` assinado por uma chave gerada na hora, um status sem corpo, um corpo cru ou um pedido que nunca responde, e conta os pedidos. O servidor recebe o endereço, as chaves e o prazo por `OpcoesDoServidor.versoes`, que só o teste passa; não é campo do `ambiente.json`. O palco aponta, por padrão, para uma porta morta: nenhum teste fala com o GitHub. `nucleo/atualizacao/descoberta.test.ts` cobre cada linha da tabela de resultado. `testes/servidor/atualizacao.test.ts` e `testes/cli/atualizacao.test.ts` cobrem, contra a release falsa, versão maior, igual e menor, chave desconhecida, corpo grande, prazo vencido, 429, o `.git`, o Bun mínimo, o intervalo de 6 horas com restart no meio, o intervalo de 30 s do agente e a busca única de dois pedidos.
 
 ## Instalação
 

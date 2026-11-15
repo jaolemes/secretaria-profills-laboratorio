@@ -32,9 +32,10 @@ import {
   type VisaoDaContaEmail,
   type VisaoDoEmail,
 } from "../dominio";
+import type { EstadoDaAtualizacao, Impedimento, VersaoPublicada } from "../atualizacao";
 import type { ResultadoDaFonte, Sincronizacao } from "../conectores";
 import { ESTADOS_DA_ESCRITA, TOOLS_DE_ESCRITA, type CartaoVisto, type ResumoDaEscrita, type ToolDeEscrita } from "../escritas";
-import { LIMITE_DO_CORPO, VERSAO_DO_NUCLEO, lerPidDoServidor, lerSistema, type ContaNoDiagnostico, type Diagnostico, type ItemIgnorado, type RespostaDaTarefa } from "../servidor";
+import { LIMITE_DO_CORPO, VERSAO_DO_NUCLEO, lerPidDoServidor, lerSistema, type AtualizacaoNoDiagnostico, type ContaNoDiagnostico, type Diagnostico, type ItemIgnorado, type RespostaDaTarefa } from "../servidor";
 import { ESTADOS_DA_TAREFA, NOMES_DOS_TITULOS_FIXOS, type IdadeDaFonte, type MeuDia, type Tarefa } from "../tarefas";
 import { acharServidor, type ClienteDoServidor } from "./cliente";
 import { destacar, encerrarPid, vivo } from "../processos";
@@ -879,6 +880,35 @@ interface PassoDaInstalacao {
   readonly detalhe: string;
 }
 
+function linhaDaAtualizacao(a: AtualizacaoNoDiagnostico): string {
+  const nova = a.versaoNova === null ? "" : `, versão nova ${a.versaoNova}`;
+  const impedimento = a.impedimento === null ? "" : ` (${a.impedimento})`;
+  return `Atualização: ${a.fase}${nova}${impedimento}, última conferência ${a.ultimaConferencia ?? "nenhuma"}.`;
+}
+
+const FRASE_DO_IMPEDIMENTO: { readonly [I in Impedimento]: (nova: VersaoPublicada) => string } = {
+  instalacao_de_desenvolvimento: () => "Esta pasta é de desenvolvimento (tem .git) e não se atualiza pelo painel.",
+  bun_antigo: (nova) => `Esta versão pede o Bun ${nova.bunMinimo} ou mais novo, e esta máquina tem o ${Bun.version}.`,
+};
+
+function descreverAtualizacao(estado: EstadoDaAtualizacao): string {
+  switch (estado.fase) {
+    case "nao_conferida":
+      return `Versão ${estado.instalada}. A Secretária ainda não conferiu se há versão nova: rode \`bun secretaria atualizacao conferir\`.`;
+    case "em_dia":
+      return `Versão ${estado.instalada}, a mais nova. Conferida em ${estado.conferidaEm}.`;
+    case "sem_internet":
+      return `Versão ${estado.instalada}. Em ${estado.tentadaEm} não deu para conferir se há versão nova: sem internet, ou o GitHub não respondeu. A Secretária confere de novo quando o vendedor abrir o painel.`;
+    case "versao_nova":
+      return [
+        `Tem versão nova: ${estado.nova.versao}, de ${estado.nova.data}. A instalada é a ${estado.instalada}.`,
+        "O que muda:",
+        ...estado.nova.oQueMuda.map((frase) => `- ${frase}`),
+        estado.impedimento === null ? "Atualizar pelo painel ainda não existe nesta versão da Secretária." : FRASE_DO_IMPEDIMENTO[estado.impedimento](estado.nova),
+      ].join("\n");
+  }
+}
+
 /** O que o `diagnostico` lê sem o servidor: nada do banco, do cofre nem dos dados do vendedor. */
 interface DiagnosticoSemServidor {
   readonly servidor: null;
@@ -1050,8 +1080,24 @@ export const COMANDOS: readonly Comando[] = [
         ...CONECTORES_UNICOS.map((id) => linhaDoConector(id, { estado: { fase: d.conectores[id].fase }, acoes: d.conectores[id].acoes })),
         ...linhasDoEmail(d.email),
         d.backup.aviso ?? `Backup do dia: ${d.backup.arquivo ?? "nenhum ainda"}.`,
+        linhaDaAtualizacao(d.atualizacao),
         ...linhasDasTravas(d.travas),
       ].join("\n"),
+  }),
+  definir<{ conferir: boolean }, EstadoDaAtualizacao>({
+    nome: "atualizacao",
+    uso: "atualizacao [conferir]",
+    resumo:
+      "Mostra se há versão nova da Secretária, pela última conferência, sem buscar. `atualizacao conferir` busca agora, no máximo uma vez a cada 30 segundos. O O que muda vem como dado. Aplicar a versão nova ainda não existe.",
+    semServidor: false,
+    interpretar(args) {
+      const [acao, ...resto] = args.posicionais;
+      if (resto.length > 0 || (acao !== undefined && acao !== "conferir")) return errado("Use `atualizacao` para ler o estado ou `atualizacao conferir` para buscar agora.");
+      return certo({ conferir: acao === "conferir" });
+    },
+    executar: async ({ conferir }, _ctx, servidor) =>
+      servidor === null ? falha("servidor_fora_do_ar") : conferir ? servidor.pedir("POST", "/api/atualizacao/conferir") : servidor.pedir("GET", "/api/atualizacao"),
+    descrever: descreverAtualizacao,
   }),
   definir<PedidoDeTarefa, { readonly tarefas: readonly Tarefa[] } | RespostaDaTarefa>({
     nome: "tarefa",

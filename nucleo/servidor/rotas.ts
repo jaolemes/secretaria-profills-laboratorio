@@ -118,6 +118,7 @@ import {
   type Tarefa,
   type TarefaComNotas,
 } from "../tarefas";
+import { montarRotasDeAtualizacao, type AtualizacaoNoDiagnostico, type Descoberta } from "./atualizacao";
 import { blocoAprovar, montarRotasDeEscritas } from "./escritas";
 import type { Publicador } from "./eventos";
 import { ehNavegacaoDeTopo, identificar, lerCorpo, origemAceita, type Chamador, type ContextoDaGuarda } from "./guarda";
@@ -140,6 +141,7 @@ export interface Diagnostico {
   readonly conectores: { readonly [C in IdConectorUnico]: { readonly fase: string; readonly acoes: readonly Acao[] } };
   readonly email: { readonly pulado: boolean; readonly contas: readonly ContaNoDiagnostico[] };
   readonly backup: EstadoDoBackup;
+  readonly atualizacao: AtualizacaoNoDiagnostico;
   /** As regras do `.claude/settings.json` do repo que mandam o agente pelo cartão. Guarda, não fronteira. */
   readonly travas: TravasNoDiagnostico;
   /** Sistema operacional e Bun: o pedido de ajuda leva isto ao suporte. */
@@ -183,6 +185,7 @@ export interface DependenciasDasRotas {
   garantirBackup(): void;
   retrato(): EstadoPainel;
   diagnostico(): Diagnostico;
+  readonly descoberta: Descoberta;
   /** O agente pediu para parar. A resposta sai antes de a parada começar. */
   pedirParada(): void;
 }
@@ -627,6 +630,7 @@ export function montarRotas(deps: DependenciasDasRotas): readonly Rota[] {
 
   return [
     ...montarRotasDeEscritas({ banco, conectores, publicador, agora: deps.agora }),
+    ...montarRotasDeAtualizacao(deps.descoberta),
     {
       metodo: "GET",
       caminho: "/",

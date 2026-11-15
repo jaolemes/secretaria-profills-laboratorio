@@ -1,13 +1,12 @@
 /**
  * O atualizador em processos de verdade, numa instalação mínima em pasta temporária com a própria
  * pasta de dados: o `main.ts` da versão nova troca a pasta, roda o `instalar` e sobe o servidor.
- * Na queda, quem volta é o `abrir` de verdade.
+ * Na queda, quem volta é o `bun secretaria abrir` da própria instalação, como o vendedor o roda.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { resolverAmbiente } from "../../nucleo/ambiente";
 import { atualizar, caminhosDoAtualizador, efeitosReais, lerAndamento, type Andamento } from "../../nucleo/atualizador";
-import { COMANDOS, type ContextoDoCli } from "../../nucleo/cli/comandos";
+import { COMANDOS } from "../../nucleo/cli/comandos";
 import type { Resultado } from "../../nucleo/dominio";
 import { montarInstalacao, retratoDaPasta, type InstalacaoMinima } from "../falsos/instalacao-minima";
 
@@ -18,7 +17,7 @@ let instalacao: InstalacaoMinima;
 afterEach(() => instalacao.limpar());
 
 function rodarProcesso(argv: string[]): { readonly codigo: number | null; readonly stdout: string; readonly stderr: string } {
-  const feito = Bun.spawnSync(argv, { cwd: instalacao.raiz, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  const feito = Bun.spawnSync(argv, { cwd: instalacao.raiz, env: { ...process.env, SECRETARIA_DADOS: instalacao.dirDados }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
   return { codigo: feito.exitCode, stdout: feito.stdout.toString(), stderr: feito.stderr.toString() };
 }
 
@@ -35,17 +34,15 @@ function andamentoNoDisco(): Andamento {
 
 const abrir = COMANDOS.find((comando) => comando.nome === "abrir");
 
-/** O `abrir` de verdade apontado para a instalação mínima: é ele que acha o andamento e termina a volta. */
-function rodarAbrir(): Promise<Resultado<unknown>> {
-  if (abrir === undefined) throw new Error("o comando abrir sumiu");
-  const { raiz, dirDados } = instalacao;
-  const ctx: ContextoDoCli = {
-    ambiente: () => resolverAmbiente({ plataforma: process.platform, env: { SECRETARIA_DADOS: dirDados }, home: dirDados }, raiz),
-    raizDoRepo: raiz,
-    subida: { argv: [process.execPath, join(raiz, "nucleo", "cli", "main.ts"), "servidor", "--json", "--dados", dirDados], prazoMs: 20_000 },
-    manterVivo: () => {},
-  };
-  return abrir.executar({ semNavegador: true }, ctx, null);
+/** `bun secretaria abrir` num processo, na pasta da instalação: o `package.json` e o CLI são os que estiverem nela. */
+function rodarAbrir(): Resultado<unknown> {
+  const saida = rodarProcesso([process.execPath, "run", "secretaria", "abrir", "--sem-navegador", "--json"]);
+  const ultima = saida.stdout.trimEnd().split("\n").at(-1) ?? "";
+  try {
+    return JSON.parse(ultima) as Resultado<unknown>;
+  } catch {
+    throw new Error(`o abrir saiu com ${saida.codigo} sem resposta: ${saida.stderr}${saida.stdout}`);
+  }
 }
 
 describe("o atualizador num processo próprio", () => {
@@ -103,16 +100,19 @@ describe("o atualizador num processo próprio", () => {
 });
 
 describe("matar o atualizador e rodar abrir volta à 0.1.0", () => {
-  const quedas: readonly (readonly [string, { readonly fase: string; readonly renames?: number; readonly naNova?: Record<string, string>; readonly passo: string; readonly motivo: string }])[] = [
+  const quedas: readonly (readonly [string, { readonly fase: string; readonly entrada?: string; readonly naNova?: Record<string, string>; readonly passo: string; readonly motivo: string }])[] = [
     ["ao esperar o banco", { fase: "esperar_banco", passo: "esperar_banco", motivo: "interrompida" }],
     ["ao preparar", { fase: "preparar", passo: "preparar", motivo: "interrompida" }],
     ["ao copiar", { fase: "copiar", passo: "copiar", motivo: "interrompida" }],
     ["ao começar a troca", { fase: "trocar", passo: "trocar", motivo: "interrompida" }],
-    ["com as dependências antigas já fora e as novas ainda não no lugar", { fase: "trocar", renames: 1, passo: "trocar", motivo: "interrompida" }],
-    ["no meio da troca", { fase: "trocar", renames: 8, passo: "trocar", motivo: "interrompida" }],
+    ["com as dependências antigas já fora e as novas ainda não no lugar", { fase: "trocar", entrada: "node_modules", passo: "trocar", motivo: "interrompida" }],
+    ["com o núcleo antigo já fora e o novo ainda não no lugar", { fase: "trocar", entrada: "nucleo", passo: "trocar", motivo: "interrompida" }],
+    ["no meio da troca do package.json", { fase: "trocar", entrada: "package.json", passo: "trocar", motivo: "interrompida" }],
+    ["no meio da troca, depois das permissões", { fase: "trocar", entrada: ".claude/settings.json", passo: "trocar", motivo: "interrompida" }],
     ["antes do instalar", { fase: "instalar", passo: "instalar", motivo: "interrompida" }],
     ["depois de migrar o banco, antes de subir", { fase: "subir", passo: "subir", motivo: "interrompida" }],
     ["no meio da volta de um instalar que falhou", { fase: "desfazer", naNova: { "instalar-falha": "" }, passo: "instalar", motivo: "instalar_falhou" }],
+    ["na volta, com o núcleo novo já fora e o antigo ainda não no lugar", { fase: "desfazer", entrada: "nucleo", naNova: { "instalar-falha": "" }, passo: "instalar", motivo: "instalar_falhou" }],
   ];
 
   test.each(quedas)(
@@ -123,11 +123,11 @@ describe("matar o atualizador e rodar abrir volta à 0.1.0", () => {
       const daNova = retratoDaPasta(instalacao.nova);
       const bancos = instalacao.retratoDosBancos();
 
-      rodarProcesso([process.execPath, join(REPO, "testes", "falsos", "atualizador-que-cai.ts"), instalacao.raiz, instalacao.dirDados, queda.fase, String(queda.renames ?? "")]);
+      rodarProcesso([process.execPath, join(REPO, "testes", "falsos", "atualizador-que-cai.ts"), instalacao.raiz, instalacao.dirDados, queda.fase, queda.entrada ?? ""]);
       expect(andamentoNoDisco().fase).toBe(queda.fase as Andamento["fase"]);
       expect(instalacao.pidDoServidor()).toBeNull();
 
-      const aberto = await rodarAbrir();
+      const aberto = rodarAbrir();
 
       expect(aberto).toMatchObject({ ok: true, dados: { subiu: true, atualizacaoDesfeita: { de: "0.1.0", para: "0.2.0" } } });
       expect(abrir?.descrever(aberto.ok ? aberto.dados : null)).toStartWith("Uma atualização da Secretária parou no meio e foi desfeita: ela segue na versão 0.1.0.");
@@ -136,7 +136,7 @@ describe("matar o atualizador e rodar abrir volta à 0.1.0", () => {
       expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
       expect(retratoDaPasta(instalacao.nova)).toEqual(daNova);
 
-      const deNovo = await rodarAbrir();
+      const deNovo = rodarAbrir();
       expect(deNovo).toMatchObject({ ok: true, dados: { subiu: false } });
       expect(deNovo.ok && (deNovo.dados as { atualizacaoDesfeita?: unknown }).atualizacaoDesfeita).toBeUndefined();
 
@@ -168,7 +168,7 @@ describe("matar o atualizador e rodar abrir volta à 0.1.0", () => {
       );
       await noInstalar;
 
-      const aberto = await rodarAbrir();
+      const aberto = rodarAbrir();
       expect(aberto).toMatchObject({ ok: false, erro: { codigo: "atualizacao_em_andamento" } });
       expect(instalacao.pidDoServidor()).toBeNull();
 
@@ -187,7 +187,7 @@ describe("matar o atualizador e rodar abrir volta à 0.1.0", () => {
       expect(andamentoNoDisco().fase).toBe("subir");
       expect(await instalacao.versaoNoAr()).toBe("0.2.0");
 
-      const aberto = await rodarAbrir();
+      const aberto = rodarAbrir();
 
       expect(aberto).toMatchObject({ ok: true, dados: { subiu: false } });
       expect(andamentoNoDisco()).toMatchObject({ fase: "concluido", falha: null });

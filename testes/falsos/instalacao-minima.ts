@@ -17,18 +17,29 @@ import { encerrarPid, vivo } from "../../nucleo/processos";
 type Arquivos = Readonly<Record<string, string | Uint8Array>>;
 
 const REPO = join(import.meta.dir, "..", "..");
-const CLI = `import ${JSON.stringify(pathToFileURL(join(import.meta.dir, "secretaria-minima.ts")).href)};\n`;
+/** Como o CLI de verdade, este só carrega com o `node_modules` no lugar. */
+const CLI = [
+  `import "marca";`,
+  `import path from "node:path";`,
+  `import { principal as daMinima } from ${JSON.stringify(pathToFileURL(join(import.meta.dir, "secretaria-minima.ts")).href)};`,
+  `export const principal = (argv: readonly string[]) => daMinima(path.resolve(import.meta.dir, "..", ".."), argv);`,
+  `if (import.meta.main) process.exit(await principal(process.argv.slice(2)));`,
+  "",
+].join("\n");
 const TRAVA = (versaoDoWacli: string) => JSON.stringify({ wacli: { versao: versaoDoWacli } });
+const PACOTE = (versao: string) => JSON.stringify({ name: "secretaria-profills", version: versao, scripts: { secretaria: "bun nucleo/cli/main.ts" } });
 
 const COMUNS: Arquivos = {
   "nucleo/cli/main.ts": CLI,
+  // Sem `node_modules`, o Bun tentaria baixar o pacote que falta: o teste não fala com a rede.
+  "bunfig.toml": "[install]\nauto = \"disable\"\n",
   "nucleo/banco/migracoes/0001_base.sql": "CREATE TABLE notas (id INTEGER PRIMARY KEY, texto TEXT NOT NULL);\n",
   "docs/arquitetura.md": "# Arquitetura\n",
 };
 
 const DA_010: Arquivos = {
   ...COMUNS,
-  "package.json": JSON.stringify({ name: "secretaria-profills", version: "0.1.0" }),
+  "package.json": PACOTE("0.1.0"),
   "ferramentas.lock.json": TRAVA("0.26.0"),
   "LEIAME-ANTIGO.md": "Só a 0.1.0 tem este arquivo.\n",
   "nucleo/marca.txt": "0.1.0\n",
@@ -40,7 +51,7 @@ const DA_010: Arquivos = {
 
 const DA_020: Arquivos = {
   ...COMUNS,
-  "package.json": JSON.stringify({ name: "secretaria-profills", version: "0.2.0" }),
+  "package.json": PACOTE("0.2.0"),
   "ferramentas.lock.json": TRAVA("0.26.0"),
   "NOVO.md": "Só a 0.2.0 tem este arquivo.\n",
   "nucleo/marca.txt": "0.2.0\n",

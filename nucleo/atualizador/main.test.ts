@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { abrirExclusivo } from "../banco/abrir";
 import { migrarInstalacao, montarInstalacao, retratoDaPasta, type InstalacaoMinima } from "../../testes/falsos/instalacao-minima";
@@ -258,6 +258,30 @@ describe("falha em cada passo deixa a 0.1.0 no ar com o banco igual", () => {
     expect(instalacao.retratoDosBancos()).toEqual(bancos);
   });
 
+  test("com o banco do vendedor em uso, desiste antes de mudar qualquer coisa", async () => {
+    instalacao = montarInstalacao();
+    const pasta = retratoDaPasta(instalacao.raiz);
+    const efeitos = efeitosDeTeste({ bancoLivre: (caminho) => path.basename(caminho) !== "meu.db" });
+
+    expect(await rodar(efeitos)).toMatchObject({ tipo: "desfeita", servidorNoAr: false, andamento: { falha: { passo: "esperar_banco", motivo: "banco_em_uso" } } });
+    expect(efeitos.fases).toEqual(["esperar_banco", "desfeito"]);
+    expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
+  });
+
+  test("entrada da versão nova que é link não entra na pasta, e a troca volta", async () => {
+    instalacao = montarInstalacao();
+    const pasta = retratoDaPasta(instalacao.raiz);
+    const alvo = path.join(instalacao.dirDados, "..", "alvo-do-link");
+    mkdirSync(alvo, { recursive: true });
+    writeFileSync(path.join(alvo, "arquitetura.md"), "de fora\n");
+    rmSync(path.join(instalacao.nova, "docs"), { recursive: true });
+    // `junction` é o link de pasta que o Windows cria sem privilégio; nos outros sistemas o tipo é ignorado.
+    symlinkSync(alvo, path.join(instalacao.nova, "docs"), "junction");
+
+    expect(await rodar(efeitosDeTeste())).toMatchObject({ tipo: "desfeita", andamento: { falha: { passo: "trocar", motivo: "troca_falhou" } } });
+    expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
+  });
+
   test("no Windows, o rename recusado por arquivo em uso é tentado de novo e a troca segue", async () => {
     instalacao = montarInstalacao();
     const reais = efeitosReais();
@@ -469,11 +493,29 @@ describe("a volta de uma atualização que morreu no meio", () => {
     expect(andamentoNoDisco().fase).toBe("concluido");
   });
 
-  test("com outro servidor no ar, não mexe na pasta nem no andamento", async () => {
+  test("com o servidor antigo no ar antes da troca, só grava o fim, sem mexer na pasta", async () => {
     instalacao = montarInstalacao();
+    const pasta = retratoDaPasta(instalacao.raiz);
     gravar({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "copiar" });
+    expect(await voltar("0.1.0")).toEqual({ tipo: "desfeita", de: "0.1.0", para: "0.2.0" });
+    expect(andamentoNoDisco()).toMatchObject({ fase: "desfeito", falha: { passo: "copiar", motivo: "interrompida" } });
+    expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
+  });
+
+  test("com o andamento preparado e o servidor que o gravou ainda no ar, espera", async () => {
+    instalacao = montarInstalacao();
+    gravar(andamentoPreparado("0.1.0", "0.2.0"));
     expect(await voltar("0.1.0")).toEqual({ tipo: "nada" });
-    expect(andamentoNoDisco().fase).toBe("copiar");
+    expect(andamentoNoDisco().fase).toBe("preparado");
+  });
+
+  test.each(["trocar", "instalar", "desfazer"])("com um servidor no ar na fase %s, não mexe em nada e diz que ele está no meio", async (fase) => {
+    instalacao = montarInstalacao();
+    const pasta = retratoDaPasta(instalacao.raiz);
+    gravar({ ...andamentoPreparado("0.1.0", "0.2.0"), fase, restaurarDados: fase !== "trocar" });
+    expect(await voltar("0.1.0")).toEqual({ tipo: "servidor_no_meio", versaoNoAr: "0.1.0" });
+    expect(andamentoNoDisco().fase).toBe(fase as Fase);
+    expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
   });
 
   test("com o banco em uso, não desfaz", async () => {
@@ -496,6 +538,8 @@ describe("a volta de uma atualização que morreu no meio", () => {
     ["formato de outra versão", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), v: 2 })],
     ["plano que sai da pasta", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", trocas: [{ caminho: "../fora", tinhaAntiga: true, temNova: true }] })],
     ["plano que aponta o meu/", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", trocas: [{ caminho: "meu", tinhaAntiga: true, temNova: false }] })],
+    ["contagem de arquivos mudados que não é inteira", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", mudados: { quantos: 1.5, caminhos: [] } })],
+    ["contagem de arquivos mudados negativa", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", mudados: { quantos: -1, caminhos: [] } })],
     ["plano que aponta as permissões locais", JSON.stringify({ ...andamentoPreparado("0.1.0", "0.2.0"), fase: "trocar", trocas: [{ caminho: ".claude/settings.local.json", tinhaAntiga: true, temNova: false }] })],
   ])("andamento com %s não manda em rename nenhum", async (_nome, texto) => {
     instalacao = montarInstalacao();

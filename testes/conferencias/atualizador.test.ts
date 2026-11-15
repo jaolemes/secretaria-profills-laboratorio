@@ -17,6 +17,15 @@ describe("o atualizador roda sozinho", () => {
     expect(imports.filter((alvo) => !alvo.startsWith("node:") && !alvo.startsWith("bun:"))).toEqual([]);
   });
 
+  test("o entrada.ts só importa do Bun e do node:, e o CLI só depois de recompor a pasta", () => {
+    const fonte = readFileSync(join(REPO, "entrada.ts"), "utf8");
+    const estaticos = [...fonte.matchAll(/^import\s[^;]*?from\s*["']([^"']+)["']/gm)].map((casamento) => casamento[1] ?? "");
+    expect(estaticos.length).toBeGreaterThan(1);
+    expect(estaticos.filter((alvo) => !alvo.startsWith("node:") && !alvo.startsWith("bun:"))).toEqual([]);
+    expect((JSON.parse(readFileSync(join(REPO, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts.secretaria).toBe("bun entrada.ts");
+    expect(unidadeDaTroca("entrada.ts")).toBe("entrada.ts");
+  });
+
   test("a lista de troca do atualizador é a do pacote, arquivo por arquivo do repo", () => {
     const git = Bun.spawnSync(["git", "ls-files", "-z"], { cwd: REPO });
     const versionados = git.stdout.toString().split("\0").filter((caminho) => caminho !== "");

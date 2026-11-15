@@ -180,6 +180,23 @@ describe("matar o atualizador e rodar abrir volta à 0.1.0", () => {
   );
 
   test(
+    "abrir com um servidor no ar no meio da troca responde servidor_preso e não mexe em nada",
+    async () => {
+      instalacao = montarInstalacao();
+      expect(rodarAbrir()).toMatchObject({ ok: true, dados: { subiu: true } });
+      const { andamento } = caminhosDoAtualizador(instalacao.raiz, instalacao.dirDados);
+      await Bun.write(andamento, JSON.stringify({ v: 1, de: "0.1.0", para: "0.2.0", iniciadoEm: "2026-11-14T10:00:00.000Z", atualizadoEm: "2026-11-14T10:00:00.000Z", fase: "trocar", trocas: [], restaurarDados: false, mudados: null, falha: null }));
+      const pasta = retratoDaPasta(instalacao.raiz);
+
+      expect(rodarAbrir()).toMatchObject({ ok: false, erro: { codigo: "servidor_preso" } });
+      expect(andamentoNoDisco().fase).toBe("trocar");
+      expect(retratoDaPasta(instalacao.raiz)).toEqual(pasta);
+      expect(await instalacao.versaoNoAr()).toBe("0.1.0");
+    },
+    PRAZO_DO_TESTE_MS,
+  );
+
+  test(
     "abrir com o servidor da versão nova já no ar só grava o fim da atualização",
     async () => {
       instalacao = montarInstalacao();

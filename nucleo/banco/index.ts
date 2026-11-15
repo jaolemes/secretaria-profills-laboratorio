@@ -4,7 +4,7 @@ import type { Instante } from "../dominio";
 import { abrirBanco, abrirExclusivo, type BancoAberto } from "./abrir";
 import { PASTA_DO_NUCLEO, lerMigracoes, migracoesPendentes, migrar } from "./migrar";
 
-export { abrirBanco, bancoEmUso, BancoEmUso, type BancoAberto, type Drizzle } from "./abrir";
+export { abrirBanco, bancoEmUso, BancoEmUso, segurarTrava, type BancoAberto, type Drizzle } from "./abrir";
 export { lerConector, gravarConector, historico, type DetalheDoEvento, type EventoDoHistorico } from "./conectores";
 export {
   gravarContaEmail,

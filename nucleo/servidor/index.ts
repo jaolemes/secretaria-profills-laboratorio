@@ -5,7 +5,6 @@ import { release } from "node:os";
 import { join } from "node:path";
 import pacote from "../../package.json";
 import { caminhosDosDados, fecharPastaDeDados, type Ambiente } from "../ambiente";
-import { juntarEstado } from "../atualizacao";
 import { backupDoDia, definirBackendDoCofre, garantirInstalacao, prepararBanco, type BancoAberto } from "../banco";
 import { PRAZO_DO_COFRE_MS, abrirCofre, comPrazo, escolherBackend, sondarCofreDoSistema, type Cofre } from "../cofre";
 import { criarConectores, type Conectores } from "../conectores";
@@ -13,7 +12,8 @@ import { CONECTORES_UNICOS, diaEm, falha, montarEstadoPainel, saida, type Estado
 import { criarSupervisor, type Supervisor } from "../processos";
 import { criarRegistro, type Registro } from "../registro";
 import { anunciarPid, apagarArquivoDoServidor, apagarPid, assumirPid, gravarArquivoDoServidor } from "./arquivo";
-import { FONTE_DAS_VERSOES, atualizacaoNoDiagnostico, criarDescoberta, type FonteDasVersoes } from "./atualizacao";
+import { criarAplicador } from "./aplicacao";
+import { FONTE_DAS_VERSOES, atualizacaoNoDiagnostico, criarDescoberta, estadoPara, type FonteDasVersoes } from "./atualizacao";
 import { encerrarGravacoesInterrompidas } from "./escritas";
 import { criarPublicador, type Publicador } from "./eventos";
 import { construirPainel } from "./painel";
@@ -60,6 +60,8 @@ export interface OpcoesDoServidor {
   readonly sincronizacaoAutomatica?: boolean;
   /** Só o teste troca: a release falsa e a chave dela. Não é campo do `ambiente.json`. */
   readonly versoes?: FonteDasVersoes;
+  /** Só o teste troca: a versão que este servidor diz ser, para a instalação de teste subir como a versão nova. */
+  readonly versaoDoNucleo?: string;
 }
 
 /** O servidor escreve uma linha JSON por evento em `<dados>/logs/servidor.log`. */
@@ -144,7 +146,8 @@ export async function iniciarServidor(ambiente: Ambiente, opcoes: OpcoesDoServid
     const sessoes = await criarSessoes(cofre);
     const painel = await construirPainel();
     const token = randomBytes(32).toString("base64url");
-    const instalacao: Instalacao = { id: dados.id, versaoNucleo: VERSAO_DO_NUCLEO, criadaEm: dados.criadaEm };
+    const versaoDoNucleo = opcoes.versaoDoNucleo ?? VERSAO_DO_NUCLEO;
+    const instalacao: Instalacao = { id: dados.id, versaoNucleo: versaoDoNucleo, criadaEm: dados.criadaEm };
 
     servidor = abrirPorta(ambiente.porta, (req, server) => {
       if (atender === null) return Promise.resolve(Response.json(saida(falha("servidor_fora_do_ar")), { status: 503 }));
@@ -169,14 +172,28 @@ export async function iniciarServidor(ambiente: Ambiente, opcoes: OpcoesDoServid
     ligados.assinarSincronizacao((andamento) => publicando.sincronizacao(andamento));
 
     const guarda = { origem, token, sessoes };
-    const info: Info = { app: "secretaria-profills", versaoNucleo: VERSAO_DO_NUCLEO, idInstalacao: dados.id };
-    const descoberta = criarDescoberta({
-      banco,
-      registro,
-      fonte: opcoes.versoes ?? FONTE_DAS_VERSOES,
-      instalada: VERSAO_DO_NUCLEO,
+    const info: Info = { app: "secretaria-profills", versaoNucleo: versaoDoNucleo, idInstalacao: dados.id };
+    const fonte = opcoes.versoes ?? FONTE_DAS_VERSOES;
+    const descoberta = criarDescoberta({ banco, registro, fonte, instalada: versaoDoNucleo, dirRepo: ambiente.dirRepo, agora: ambiente.agora });
+    let parar: () => Promise<void> = () => Promise.resolve();
+    const pedirParada = () => {
+      setTimeout(() => void parar(), 0);
+    };
+    const aplicador = criarAplicador({
+      descoberta,
+      fonte,
+      instalada: versaoDoNucleo,
       dirRepo: ambiente.dirRepo,
+      dirDados: ambiente.dirDados,
+      banco,
+      conectores: ligados,
+      supervisor,
+      sessoes,
+      registro,
+      subiuEm: ambiente.agora(),
       agora: ambiente.agora,
+      aoMudar: (estado) => publicando.atualizacao({ painel: estado, agente: estadoPara(estado, "agente") }),
+      pedirParada,
     });
     const diagnostico = (): Diagnostico => {
       const estados = ligados.estado();
@@ -206,7 +223,7 @@ export async function iniciarServidor(ambiente: Ambiente, opcoes: OpcoesDoServid
           })),
         },
         backup,
-        atualizacao: atualizacaoNoDiagnostico(juntarEstado(descoberta.estado(), { tipo: "nenhuma" }, []), descoberta.estado()),
+        atualizacao: atualizacaoNoDiagnostico(aplicador.estado(), descoberta.estado()),
         travas: lerTravas(ambiente.dirRepo),
         sistema: lerSistema(),
       };
@@ -218,7 +235,7 @@ export async function iniciarServidor(ambiente: Ambiente, opcoes: OpcoesDoServid
       avisarParado = resolver;
     });
     const ouvindo = servidor;
-    const parar = (): Promise<void> => {
+    parar = (): Promise<void> => {
       parando ??= (async () => {
         registro.info("servidor.parando", {});
         await ligados.parar();
@@ -250,9 +267,8 @@ export async function iniciarServidor(ambiente: Ambiente, opcoes: OpcoesDoServid
       retrato,
       diagnostico,
       descoberta,
-      pedirParada: () => {
-        setTimeout(() => void parar(), 0);
-      },
+      aplicador,
+      pedirParada,
     });
     atender = criarAtendimento(rotas, guarda);
     gravarArquivoDoServidor(caminhos.servidor, { v: 1, origem, pid: process.pid, idInstalacao: dados.id, token });

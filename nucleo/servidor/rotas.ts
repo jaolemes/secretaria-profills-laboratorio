@@ -118,6 +118,7 @@ import {
   type Tarefa,
   type TarefaComNotas,
 } from "../tarefas";
+import type { Aplicador } from "./aplicacao";
 import { montarRotasDeAtualizacao, type AtualizacaoNoDiagnostico, type Descoberta } from "./atualizacao";
 import { blocoAprovar, montarRotasDeEscritas } from "./escritas";
 import type { Publicador } from "./eventos";
@@ -186,6 +187,7 @@ export interface DependenciasDasRotas {
   retrato(): EstadoPainel;
   diagnostico(): Diagnostico;
   readonly descoberta: Descoberta;
+  readonly aplicador: Aplicador;
   /** O agente pediu para parar. A resposta sai antes de a parada começar. */
   pedirParada(): void;
 }
@@ -630,7 +632,7 @@ export function montarRotas(deps: DependenciasDasRotas): readonly Rota[] {
 
   return [
     ...montarRotasDeEscritas({ banco, conectores, publicador, agora: deps.agora }),
-    ...montarRotasDeAtualizacao(deps.descoberta),
+    ...montarRotasDeAtualizacao(deps.descoberta, deps.aplicador),
     {
       metodo: "GET",
       caminho: "/",

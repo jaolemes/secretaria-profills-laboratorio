@@ -8,7 +8,6 @@ import {
   TETO_DO_ENVELOPE_BYTES,
   deveBuscar,
   estadoDaAtualizacao,
-  juntarEstado,
   lerConferenciaGuardada,
   lerResposta,
   type ChavePublica,
@@ -22,6 +21,7 @@ import {
 import { gravarConferenciaDeVersao, lerConferenciaDeVersao, type BancoAberto } from "../banco";
 import { detalheComoDado, falha, ok, textoExterno, type Instante, type Resultado } from "../dominio";
 import type { Registro } from "../registro";
+import type { Aplicador } from "./aplicacao";
 import type { Chamador } from "./guarda";
 import { respostaJson, type Rota } from "./rotas";
 
@@ -30,9 +30,16 @@ export interface FonteDasVersoes {
   readonly endereco: URL;
   readonly chaves: readonly ChavePublica[];
   readonly prazoMs: number;
+  /** De onde baixar o pacote cuja URL canônica o manifesto assinado traz. Fora do teste, a própria URL. */
+  pacote(url: string): URL;
 }
 
-export const FONTE_DAS_VERSOES: FonteDasVersoes = { endereco: new URL(ENDERECO_DA_ULTIMA_VERSAO), chaves: CHAVES_PUBLICAS, prazoMs: PRAZO_DA_BUSCA_MS };
+export const FONTE_DAS_VERSOES: FonteDasVersoes = {
+  endereco: new URL(ENDERECO_DA_ULTIMA_VERSAO),
+  chaves: CHAVES_PUBLICAS,
+  prazoMs: PRAZO_DA_BUSCA_MS,
+  pacote: (url) => new URL(url),
+};
 
 export interface Descoberta {
   /** O estado da última conferência, sem buscar. */
@@ -66,7 +73,7 @@ async function lerComTeto(corpo: ReadableStream<Uint8Array>): Promise<string> {
 }
 
 /** Sem internet não é erro: vira `sem_resposta`. O prazo cobre a resposta inteira, corpo incluído. */
-async function buscarVersao(fonte: FonteDasVersoes): Promise<RespostaDaBusca> {
+export async function buscarVersao(fonte: FonteDasVersoes): Promise<RespostaDaBusca> {
   try {
     const resposta = await fetch(fonte.endereco, { signal: AbortSignal.timeout(fonte.prazoMs) });
     if (resposta.status !== 200 || resposta.body === null) {
@@ -149,16 +156,26 @@ function cedoDemais(esperaS: number): Resultado<never> {
   return recusa.ok ? recusa : { ok: false, erro: { ...recusa.erro, esperaS } };
 }
 
-/** Ler e conferir. Aplicar a versão ainda não existe. */
-export function montarRotasDeAtualizacao(descoberta: Descoberta): readonly Rota[] {
+const SO_O_VENDEDOR_ATUALIZA =
+  "Atualizar a Secretária é decisão do vendedor, no painel. Conte a ele o que muda e que a Secretária fica uns minutos fora do ar enquanto troca de versão.";
+
+/** O erro do aplicar leva o estado em `atual`; ao agente, com o O que muda citado como dado. */
+function recusaPara(resultado: Resultado<EstadoDaAtualizacao>, chamador: Chamador): Resultado<EstadoDaAtualizacao> {
+  if (resultado.ok) return ok(estadoPara(resultado.dados, chamador));
+  const { atual } = resultado.erro;
+  return atual === undefined ? resultado : { ok: false, erro: { ...resultado.erro, atual: estadoPara(atual as EstadoDaAtualizacao, chamador) } };
+}
+
+/** Ler, conferir e aplicar. Aplicar é só do painel: o agente recebe `so_no_painel`. */
+export function montarRotasDeAtualizacao(descoberta: Descoberta, aplicador: Aplicador): readonly Rota[] {
   return [
     {
       metodo: "GET",
       caminho: "/api/atualizacao",
       quem: ["painel", "agente"],
       async tratar({ chamador }) {
-        const estado = chamador === "painel" ? await descoberta.aoAbrirOPainel() : descoberta.estado();
-        return respostaJson(ok(estadoPara(juntarEstado(estado, { tipo: "nenhuma" }, []), chamador)), chamador);
+        if (chamador === "painel") await descoberta.aoAbrirOPainel();
+        return respostaJson(ok(estadoPara(aplicador.estado(), chamador)), chamador);
       },
     },
     {
@@ -168,7 +185,17 @@ export function montarRotasDeAtualizacao(descoberta: Descoberta): readonly Rota[
       async tratar({ chamador }) {
         const espera = chamador === "agente" ? descoberta.esperaDoAgenteS() : 0;
         if (espera > 0) return respostaJson(cedoDemais(espera), chamador);
-        return respostaJson(ok(estadoPara(juntarEstado(await descoberta.conferir(), { tipo: "nenhuma" }, []), chamador)), chamador);
+        await descoberta.conferir();
+        return respostaJson(ok(estadoPara(aplicador.estado(), chamador)), chamador);
+      },
+    },
+    {
+      metodo: "POST",
+      caminho: "/api/atualizacao/aplicar",
+      quem: ["painel", "agente"],
+      tratar({ req, chamador }) {
+        if (chamador !== "painel") return respostaJson(falha("so_no_painel", SO_O_VENDEDOR_ATUALIZA), chamador);
+        return respostaJson(recusaPara(aplicador.aplicar(req.headers.get("cookie")), chamador), chamador);
       },
     },
   ];

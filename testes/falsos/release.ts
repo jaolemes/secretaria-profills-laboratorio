@@ -65,7 +65,7 @@ export async function subirReleaseFalsa(): Promise<ReleaseFalsa> {
         pedidosDoPacote += 1;
         const servido = pacote;
         if (servido.segurar !== null) await servido.segurar;
-        return new Response(servido.bytes, { headers: { "Content-Type": "application/octet-stream" } });
+        return new Response(new Blob([new Uint8Array(servido.bytes)]), { headers: { "Content-Type": "application/octet-stream" } });
       }
       if (caminho !== CAMINHO) return new Response("não existe", { status: 404 });
       pedidos += 1;

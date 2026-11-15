@@ -23,6 +23,7 @@ import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from "@/com
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "cn";
 import type { QuemUsa } from "../dominio";
+import { AvisoNoCartao, LinhaDaVersao, PontoDeNovidade, SimboloDaAtualizacao, type ControleDaAtualizacao } from "./AvisoDaAtualizacao";
 import type { Tom } from "./descrever";
 import { rotulosDeQuemUsa, type ConexoesDaLateral, type LinhaDoMenu, type ModeloDoMenu } from "./lateral";
 import type { IdDoBloco } from "./meu-dia";
@@ -246,10 +247,14 @@ function ListaDoMenu({ modelo, recolhida, naGaveta }: { modelo: ModeloDoMenu; re
   );
 }
 
-/** O cartão do pé: quem está usando, o resumo das conexões e, aberta, cada fonte com a idade, que sobe dentro do cartão. */
-function CartaoDoPe({ conexoes, quem }: { conexoes: ConexoesDaLateral; quem: QuemNoCartao }) {
+/**
+ * O cartão do pé: quem está usando, o resumo das conexões e, aberta, cada fonte com a idade e a versão,
+ * que sobem dentro do cartão. A atualização, quando há o que dizer, fica logo acima de quem usa.
+ */
+function CartaoDoPe({ conexoes, quem, atualizacao }: { conexoes: ConexoesDaLateral; quem: QuemNoCartao; atualizacao: ControleDaAtualizacao }) {
   const [aberto, alternar] = useLembrado(CHAVE_FONTES_ABERTAS);
   const id = useId();
+  const { vista } = atualizacao;
   return (
     <div className={cn("overflow-hidden rounded-xl border bg-card transition-shadow duration-200", aberto && "shadow-[var(--sombra-do-painel)]")}>
       <div id={id} inert={!aberto} className={cn("grid transition-[grid-template-rows,opacity] duration-200 ease-out", aberto ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
@@ -264,8 +269,10 @@ function CartaoDoPe({ conexoes, quem }: { conexoes: ConexoesDaLateral; quem: Que
               </li>
             ))}
           </ul>
+          {vista !== null && <LinhaDaVersao vista={vista} />}
         </div>
       </div>
+      {vista?.aviso && <AvisoNoCartao aviso={vista.aviso} ocupado={atualizacao.ocupado} agir={atualizacao.agir} />}
       {quem !== null && <LinhaDeQuemUsa quem={quem.quem} abrir={quem.abrir} recolhida={false} comBorda />}
       <button
         type="button"
@@ -283,8 +290,20 @@ function CartaoDoPe({ conexoes, quem }: { conexoes: ConexoesDaLateral; quem: Que
   );
 }
 
+/** Recolhida, a atualização vira um ícone acima de quem usa. O clique abre a lateral, onde está o botão. */
+function AtualizacaoRecolhida({ girando, ponto, rotulo, abrir }: { girando: boolean; ponto: boolean; rotulo: string; abrir: () => void }) {
+  return (
+    <Dica texto={girando ? rotulo : `${rotulo} · abrir a lateral`} ativa>
+      <Button variant="ghost" size="icon-sm" aria-label={rotulo} onClick={abrir} className="relative mx-auto text-muted-foreground hover:bg-passar hover:text-foreground">
+        <SimboloDaAtualizacao icone={girando ? "girando" : "versao_nova"} />
+        {ponto && <PontoDeNovidade />}
+      </Button>
+    </Dica>
+  );
+}
+
 /** A lateral do computador: cabeçalho com o lugar do logo e o recolher, o menu que rola por dentro e o cartão do pé. Sem barra no topo. */
-export function Lateral({ modelo, quem }: { modelo: ModeloDoMenu; quem: QuemNoCartao }) {
+export function Lateral({ modelo, quem, atualizacao }: { modelo: ModeloDoMenu; quem: QuemNoCartao; atualizacao: ControleDaAtualizacao }) {
   const [recolhida, alternar] = useLembrado(CHAVE_RECOLHIDA);
   const rotuloDoBotao = recolhida ? "Abrir a lateral" : "Recolher a lateral";
   return (
@@ -306,12 +325,13 @@ export function Lateral({ modelo, quem }: { modelo: ModeloDoMenu; quem: QuemNoCa
       </div>
       {modelo.cartao !== null && !recolhida && (
         <div className="relative z-[3] flex-none bg-sidebar pt-2.5 pr-2.5">
-          <CartaoDoPe conexoes={modelo.cartao} quem={quem} />
+          <CartaoDoPe conexoes={modelo.cartao} quem={quem} atualizacao={atualizacao} />
         </div>
       )}
-      {recolhida && quem !== null && (
-        <div className="relative z-[3] flex-none bg-sidebar pt-2.5 pr-2.5">
-          <LinhaDeQuemUsa quem={quem.quem} abrir={quem.abrir} recolhida comBorda={false} />
+      {recolhida && (quem !== null || atualizacao.vista?.recolhida) && (
+        <div className="relative z-[3] flex flex-none flex-col gap-1 bg-sidebar pt-2.5 pr-2.5">
+          {atualizacao.vista?.recolhida && <AtualizacaoRecolhida {...atualizacao.vista.recolhida} abrir={alternar} />}
+          {quem !== null && <LinhaDeQuemUsa quem={quem.quem} abrir={quem.abrir} recolhida comBorda={false} />}
         </div>
       )}
     </nav>
@@ -319,7 +339,8 @@ export function Lateral({ modelo, quem }: { modelo: ModeloDoMenu; quem: QuemNoCa
 }
 
 /** No celular: o botão Menu no topo do conteúdo abre o mesmo menu numa gaveta pela esquerda. A gaveta fecha com Esc, com o X ou ao escolher uma tela. */
-export function MenuDoCelular({ modelo, quem }: { modelo: ModeloDoMenu; quem: QuemNoCartao }) {
+export function MenuDoCelular({ modelo, quem, atualizacao }: { modelo: ModeloDoMenu; quem: QuemNoCartao; atualizacao: ControleDaAtualizacao }) {
+  const novidade = atualizacao.vista?.pontoNoMenu === true;
   const [aberto, setAberto] = useState(false);
   // A janela do nome abre sobre a página, com a gaveta já fechada: duas camadas modais seguidas confundem o foco.
   const quemNaGaveta: QuemNoCartao =
@@ -336,9 +357,10 @@ export function MenuDoCelular({ modelo, quem }: { modelo: ModeloDoMenu; quem: Qu
     <div className="flex items-center gap-2.5 md:hidden">
       <Sheet open={aberto} onOpenChange={setAberto}>
         <SheetTrigger asChild>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" aria-label={novidade ? "Menu, tem novidade" : undefined} className="relative">
             <Menu aria-hidden />
             Menu
+            {novidade && <PontoDeNovidade />}
           </Button>
         </SheetTrigger>
         <SheetContent
@@ -370,7 +392,7 @@ export function MenuDoCelular({ modelo, quem }: { modelo: ModeloDoMenu; quem: Qu
             <ListaDoMenu modelo={modelo} recolhida={false} naGaveta />
             {modelo.cartao !== null && (
               <div className="mt-auto pt-2.5">
-                <CartaoDoPe conexoes={modelo.cartao} quem={quemNaGaveta} />
+                <CartaoDoPe conexoes={modelo.cartao} quem={quemNaGaveta} atualizacao={atualizacao} />
               </div>
             )}
           </nav>

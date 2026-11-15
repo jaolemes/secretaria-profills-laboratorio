@@ -32,7 +32,7 @@ describe("lerNovidades", () => {
   });
 
   test("aceita data, número e palavra com hífen na frase", () => {
-    const frase = "A partir de 20/11, o e-mail lê até 1.250 mensagens por conta.";
+    const frase = "A partir de 20/11, às 9:30, o e-mail lê até 1.250 mensagens: veja no painel.";
     expect(lerNovidades(arquivo([`- ${frase}`])).ok).toBe(true);
   });
 
@@ -56,6 +56,10 @@ describe("lerNovidades", () => {
     ["crase", arquivo(["- O comando `abrir` ficou mais rápido."]), "crase"],
     ["link", arquivo(["- Veja https://exemplo.com.br para saber mais."]), "link"],
     ["link em markdown", arquivo(["- Veja [o guia](guia) para saber mais."]), "link"],
+    ["link javascript", arquivo(["- Clique em javascript:alert(1) agora."]), "link"],
+    ["link de e-mail", arquivo(["- Veja mailto:a@b.com agora."]), "link"],
+    ["tag HTML", arquivo(["- O painel <img src=x onerror=alert(1)> ficou bom."]), "HTML"],
+    ["sinal de maior", arquivo(["- O painel ficou > melhor."]), "HTML"],
     ["nome de arquivo", arquivo(["- O ambiente.json aceita o campo navegador."]), "nome de arquivo"],
     ["caminho de pasta", arquivo(["- A pasta nucleo/painel ganhou uma tela."]), "caminho de pasta"],
     ["comando", arquivo(["- Rode bun secretaria abrir para ver o painel."]), "tem comando"],

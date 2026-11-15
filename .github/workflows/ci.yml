@@ -67,3 +67,25 @@ jobs:
           $erros = $null
           [System.Management.Automation.Language.Parser]::ParseFile("$PWD\instalar.ps1", [ref]$null, [ref]$erros) | Out-Null
           if ($erros) { $erros; exit 1 }
+
+  # Roda ao lado do `nucleo`: o script de instalação instala a versão anterior e o botão atualiza para a candidata.
+  instalacao:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - name: Instala a versão anterior pelo script e atualiza para a candidata
+        run: bun testes/instalacao/pelo-script.ts

@@ -1,21 +1,17 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
-  CHAVES_PUBLICAS,
-  ENDERECO_DA_ULTIMA_VERSAO,
   INTERVALO_DO_AGENTE_MS,
-  PRAZO_DA_BUSCA_MS,
-  TETO_DO_ENVELOPE_BYTES,
+  buscarVersao,
   deveBuscar,
   estadoDaAtualizacao,
   lerConferenciaGuardada,
   lerResposta,
-  type ChavePublica,
   type Conferencia,
   type EstadoDaAtualizacao,
   type EstadoDaDescoberta,
+  type FonteDasVersoes,
   type Impedimento,
-  type RespostaDaBusca,
   type VersaoPublicada,
 } from "../atualizacao";
 import { gravarConferenciaDeVersao, lerConferenciaDeVersao, type BancoAberto } from "../banco";
@@ -24,22 +20,6 @@ import type { Registro } from "../registro";
 import type { Aplicador } from "./aplicacao";
 import type { Chamador } from "./guarda";
 import { respostaJson, type Rota } from "./rotas";
-
-/** Onde a Secretária confere a última versão e quais chaves aceita. Fora do teste, é sempre o que está no código. */
-export interface FonteDasVersoes {
-  readonly endereco: URL;
-  readonly chaves: readonly ChavePublica[];
-  readonly prazoMs: number;
-  /** De onde baixar o pacote cuja URL canônica o manifesto assinado traz. Fora do teste, a própria URL. */
-  pacote(url: string): URL;
-}
-
-export const FONTE_DAS_VERSOES: FonteDasVersoes = {
-  endereco: new URL(ENDERECO_DA_ULTIMA_VERSAO),
-  chaves: CHAVES_PUBLICAS,
-  prazoMs: PRAZO_DA_BUSCA_MS,
-  pacote: (url) => new URL(url),
-};
 
 export interface Descoberta {
   /** O estado da última conferência, sem buscar. */
@@ -58,32 +38,6 @@ export interface AtualizacaoNoDiagnostico {
   readonly versaoNova: string | null;
   readonly impedimento: Impedimento | null;
   readonly ultimaConferencia: string | null;
-}
-
-async function lerComTeto(corpo: ReadableStream<Uint8Array>): Promise<string> {
-  const partes: Uint8Array[] = [];
-  let total = 0;
-  for await (const parte of corpo) {
-    partes.push(parte);
-    total += parte.length;
-    // Passou do teto: o envelope já é recusado pelo tamanho, e o resto nem é lido.
-    if (total > TETO_DO_ENVELOPE_BYTES) break;
-  }
-  return new TextDecoder().decode(Buffer.concat(partes));
-}
-
-/** Sem internet não é erro: vira `sem_resposta`. O prazo cobre a resposta inteira, corpo incluído. */
-export async function buscarVersao(fonte: FonteDasVersoes): Promise<RespostaDaBusca> {
-  try {
-    const resposta = await fetch(fonte.endereco, { signal: AbortSignal.timeout(fonte.prazoMs) });
-    if (resposta.status !== 200 || resposta.body === null) {
-      await resposta.body?.cancel();
-      return { tipo: "http", status: resposta.status, corpo: "" };
-    }
-    return { tipo: "http", status: 200, corpo: await lerComTeto(resposta.body) };
-  } catch {
-    return { tipo: "sem_resposta" };
-  }
 }
 
 export function criarDescoberta(deps: {

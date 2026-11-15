@@ -4,22 +4,33 @@ A Secretária é a base pessoal de cada vendedor da Profills. Ela roda só no co
 
 ## Instalar
 
-O endereço oficial da Secretária é `https://github.com/profillsbrasil/secretaria-profills`. Instale e atualize só a partir dele. Não instale de cópia, fork ou arquivo que outra pessoa mandou: o agente segue as instruções que estão no repo, e uma cópia alterada pode mandar o agente fazer outra coisa no seu computador.
+O endereço oficial da Secretária é `https://github.com/profillsbrasil/secretaria-profills`. Instale e atualize só a partir dele, com os comandos abaixo. Não instale de cópia, fork ou arquivo que outra pessoa mandou: o agente segue as instruções que estão no repo, e uma cópia alterada pode mandar o agente fazer outra coisa no seu computador.
 
-O jeito normal é abrir o agente nesta pasta e pedir: "instale a Secretária". O agente segue a skill `secretaria-setup`.
+A Secretária se instala pela última versão publicada, e não por `git clone`. O script de instalação baixa o pacote dessa versão, confere a assinatura e o sha256 antes de abrir o pacote, cria a pasta `secretaria-profills` e abre o painel. Abra o terminal na pasta onde a Secretária vai morar (a sua pasta pessoal serve) e rode uma linha:
+
+| Sistema | Comando |
+|---|---|
+| Linux e macOS | `curl -fsSL https://raw.githubusercontent.com/profillsbrasil/secretaria-profills/main/instalar.sh \| sh` |
+| Windows (PowerShell) | `powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/profillsbrasil/secretaria-profills/main/instalar.ps1 \| iex"` |
+
+O script instala o Bun 1.4.4 se faltar um Bun dessa versão ou mais novo, sem `sudo` e sem senha, prepara a máquina e abre o painel. Rodar de novo não estraga nada. No Linux, o instalador do Bun precisa de `curl`, `bash` e `unzip`. No macOS, o WhatsApp pede macOS 15 ou mais novo. Enquanto não houver versão publicada, o script diz isso e sai sem instalar nada.
+
+Depois, abra o agente na pasta `secretaria-profills` e peça: "instale a Secretária". O agente segue a skill `secretaria-setup`.
 
 O agente vai pedir permissão para rodar `bun secretaria`, `bun --version` e `bun install` nesta pasta. Só quando falta o Bun, ele pede também `sh instalar.sh` (no Windows, `powershell -ExecutionPolicy Bypass -File instalar.ps1`). Pode aceitar: são os comandos da Secretária e da instalação dela.
 
 No Codex, o servidor da Secretária que o agente sobe para quando o comando dele termina. Então quem deixa a Secretária no ar é você: abra o terminal nesta pasta e digite `bun secretaria abrir`. Quando o painel abrir no navegador, pode seguir. O servidor continua no ar mesmo que você feche o terminal. O agente só diz que está funcionando depois de conferir com o servidor no ar.
 
-Sem agente, clone o repo (`git clone https://github.com/profillsbrasil/secretaria-profills`) e rode uma linha na pasta dele:
+### Reinstalar numa pasta que já existe
 
-| Sistema | Comando |
-|---|---|
-| Linux e macOS | `sh instalar.sh` |
-| Windows (PowerShell) | `powershell -ExecutionPolicy Bypass -File instalar.ps1` |
+O script também roda dentro de uma pasta que já tem a Secretária, como `sh instalar.sh` (no Windows, `powershell -ExecutionPolicy Bypass -File instalar.ps1`), ou recebe a pasta no fim: `sh instalar.sh <pasta>`. É o caminho de quem instalou antes por `git clone`: a pasta com `.git` não ganha o botão Atualizar, e o script a troca uma vez pela versão publicada.
 
-O script instala o Bun 1.4.4 se faltar um Bun dessa versão ou mais novo, sem `sudo` e sem senha, prepara a máquina e abre o painel. Rodar de novo não estraga nada. No Linux, o instalador do Bun precisa de `curl`, `bash` e `unzip`. No macOS, o WhatsApp pede macOS 15 ou mais novo.
+1. O script fecha a Secretária dessa pasta.
+2. Leva tudo o que estava nela, menos a pasta `meu/`, para uma pasta ao lado, `secretaria-profills-antes-<data e hora>`, com o `.git` junto. Nada é apagado.
+3. Põe a versão publicada no lugar, deixa a pasta `meu/` como estava e traz de volta as permissões do agente (`.claude/settings.local.json`).
+4. Instala as dependências e abre o painel.
+
+Os dados (banco, conexões, senhas) ficam na pasta de dados do sistema, fora desta pasta, e não mudam. Quando tudo estiver funcionando, apague a pasta guardada. Se a troca falhar no meio, a pasta volta a ser o que era e o script diz o que fechar antes de rodar de novo. Na versão publicada, já instalada pelo script, ele não baixa de novo. Numa pasta com uma versão mais nova que a publicada, ou com outros arquivos que não são da Secretária, ele não mexe em nada.
 
 ## O que o painel pede
 
@@ -81,7 +92,15 @@ Se o arquivo já existe, acrescente o campo e mantenha os outros. O arquivo acei
 
 ## Atualizar
 
-Traga o código novo com `git pull` e rode o script de instalação de novo. O `git pull` deve vir de `https://github.com/profillsbrasil/secretaria-profills`: `git remote -v` mostra de onde ele vem. O que é do vendedor fica em `meu/` e não é tocado pela atualização.
+Quando sai uma versão nova, o cartão do pé da lateral, o das conexões, mostra "Tem versão nova", o que muda e o botão Atualizar. Com a lateral recolhida, o ícone ganha um ponto; no celular, o ponto fica no botão Menu. A Secretária confere se há versão nova quando você abre o painel, no máximo a cada 6 horas. Atualizar é decisão sua: o agente avisa e conta o que muda, mas não clica.
+
+Ao clicar, a Secretária baixa a versão nova, confere a assinatura, instala as dependências e reinicia. Ela fica uns minutos fora do ar, e o painel recarrega sozinho na versão nova. A pasta `meu/`, o banco e as conexões ficam: o WhatsApp volta conectado sem ler o QR de novo. O agente que já estava aberto segue com as regras antigas até você abrir uma conversa nova.
+
+O botão fica apagado, com a explicação, enquanto um cartão grava no CRM, uma sincronização roda ou uma conexão está no meio. Espere terminar e clique.
+
+Se não der para atualizar, o cartão diz "Não deu para atualizar" e o motivo, e a Secretária continua na versão de antes, funcionando. Clique em Tentar de novo. Se falhar outra vez, diga "deu erro" ao agente: o pedido ao suporte leva a versão e o motivo, sem dado de cliente. Se o cartão disser que a versão pede uma atualização do instalador, rode o script de instalação de novo dentro da pasta da Secretária (veja "Reinstalar numa pasta que já existe").
+
+A pasta instalada por `git clone` não ganha o botão. Reinstale uma vez pelo script, como em "Reinstalar numa pasta que já existe". Atualize só pelo botão ou pelo script: o que é do vendedor fica em `meu/` e nunca é tocado pela atualização.
 
 ## Mais
 

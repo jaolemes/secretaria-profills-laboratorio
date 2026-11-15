@@ -1006,7 +1006,7 @@ A mesma regra vale nas duas pontas. `montarPacote` pula o que está fora da list
 
 `extrairPacote` só aceita um `PacoteConferido`, que só `conferirPacote` cria: não há como extrair bytes que não passaram pelo sha256 do manifesto. O destino precisa não existir ou estar vazio, e a extração confere todas as entradas antes de gravar o primeiro byte. O bit de execução do `instalar.sh` volta no Linux e no macOS.
 
-O pacote não leva `meu/`. Uma pasta extraída do pacote não tem `meu/AGENTS.md` nem `meu/README.md`: quem instalar do zero pelo pacote precisa criar esse esqueleto.
+O pacote não leva `meu/`. Uma pasta extraída do pacote não tem `meu/AGENTS.md` nem `meu/README.md`: a instalação pelo script cria esse esqueleto (seção "Instalação").
 
 ### Chaves de assinatura
 
@@ -1031,6 +1031,8 @@ Cada comando grava a chave privada (PKCS8 em base64) no arquivo, só com leitura
 3. O dono cadastra o segredo do ambiente, sem a chave passar por chat nem por arquivo do repo: `gh secret set SECRETARIA_CHAVE_DE_ASSINATURA --env release --repo profillsbrasil/secretaria-profills < ~/secretaria-chave-ativa`.
 4. O arquivo da chave reserva vai para fora do computador de trabalho (gerenciador de senhas ou mídia guardada), e o da ativa é apagado: a cópia dela é o segredo do ambiente.
 5. Em Settings, Rules, uma regra de tag para `v*` restringe criar, mover e apagar ao dono. Em Settings, General, Releases, a release imutável impede trocar um anexo depois de publicado.
+
+As chaves também vão embutidas no `instalar.sh` e no `instalar.ps1` (seção "Instalação"): o PR que muda `CHAVES_PUBLICAS` roda `bun nucleo/atualizacao/script.ts`, e `testes/conferencias/entrada.test.ts` falha até isso.
 
 Trocar a chave ativa: o dono gera um par novo, o PR da versão põe a pública nova em `CHAVES_PUBLICAS` no lugar da antiga, e essa versão é assinada com a reserva, cadastrada no segredo só para essa release. As instalações aceitam, porque já conhecem a reserva. Depois o segredo recebe a ativa nova, e uma reserva nova entra na versão seguinte.
 
@@ -1311,7 +1313,48 @@ Não verificado: o rename de pasta no Windows com o servidor real recém-parado 
 
 ## Instalação
 
-`instalar.sh` e `instalar.ps1` só garantem um Bun que atenda `engines.bun` (instalam o fixado quando falta e nunca rebaixam um mais novo) e chamam `bun install --frozen-lockfile`, `bun secretaria instalar` e `bun secretaria abrir`. O resto é a lista `PASSOS` em `nucleo/instalador/passos.ts`: `bun`, `dependencias`, `pasta_dados`, `wacli`, `banco`, `cofre`, `skills`, `saude`. Cada passo tem `verificar`, que não muda nada, e `aplicar`, que só roda quando falta algo. Rodar duas vezes devolve `ja_estava` em tudo.
+A instalação é pela última versão marcada, nunca por `git clone` nem pela `main`. O vendedor baixa o script pelo endereço do `README.md` e roda: `instalar.sh` e `instalar.ps1` só garantem um Bun que atenda `engines.bun` (instalam o fixado quando falta e nunca rebaixam um mais novo), gravam o instalador embutido numa pasta temporária, rodam `bun <instalador> [pasta]` e apagam a pasta temporária. O `instalar.ps1` não chama `exit`: rodado por `irm | iex`, ele fecharia a janela antes de o vendedor ler a mensagem; a falha sai por `throw`.
+
+### O instalador embutido
+
+`nucleo/atualizacao/instalacao.ts` é o instalador. `bun nucleo/atualizacao/script.ts` o junta, com o que ele usa de `nucleo/atualizacao` (envelope, manifesto, pacote, tar e `fonte.ts`), num arquivo só, pelo `Bun.build`, e regrava o bloco entre `cat > "$instalador" <<'FIM_DO_INSTALADOR'` e `FIM_DO_INSTALADOR` no `instalar.sh` e entre `$Instalador = @'` e `'@` no `instalar.ps1`. O bloco traz as chaves de `CHAVES_PUBLICAS` e o esqueleto de `meu/` (`ESQUELETO_DE_MEU`), e só tem ASCII, porque o Bun escapa os acentos: o PowerShell 5.1 lê o `.ps1` sem BOM como ANSI.
+
+Por que embutido. O script roda antes de a Secretária existir na máquina, então quem confere a assinatura não pode vir do pacote que ela confere. Um conferidor baixado de outro endereço teria a mesma confiança do script, mais um download que pode faltar ou mudar entre os dois pedidos. Embutido, quem confere é o código que veio no script, com as mesmas regras de `nucleo/atualizacao`, sem cópia à mão, e funciona com `curl ... | sh` e `irm ... | iex`, em que o script não tem pasta. `FONTE_DAS_VERSOES`, `buscarVersao` e `baixarPacote` moram em `nucleo/atualizacao/fonte.ts` e servem ao servidor e ao instalador.
+
+`testes/conferencias/entrada.test.ts` reprova o script cujo bloco não é o que o gerador monta agora, o bloco cujas chaves não são as de `CHAVES_PUBLICAS` e o esqueleto que não é o `meu/` versionado. Mudou `nucleo/atualizacao`, as chaves ou o `meu/`: rode o gerador.
+
+### O que o instalador faz
+
+Sem pasta dita, o destino é a pasta atual quando ela é a Secretária (`package.json` com `name` igual a `secretaria-profills`), e `secretaria-profills` dentro dela quando não é.
+
+| Passo | O que faz | Recusa |
+|---|---|---|
+| 1 | busca o `versao.json` em `ENDERECO_DA_ULTIMA_VERSAO`, no prazo de 5 s da descoberta | `sem_versao_publicada` com 404; `sem_internet` sem resposta ou com outro status |
+| 2 | confere a assinatura com as chaves embutidas (`abrirEnvelope`) e lê o manifesto (`lerManifesto`) | `versao_recusada` |
+| 3 | confere o Bun mínimo do manifesto | `bun_antigo` |
+| 4 | lê a pasta: nova (não existe ou vazia), Secretária ou outra coisa | `pasta_de_outra_coisa`; `versao_mais_velha` quando a pasta tem uma versão maior que a publicada. Na versão publicada, instalada pelo pacote e sem `.git`, o desfecho é `ja_estava` e o instalador pula para o passo 10 |
+| 5 | baixa o pacote (`baixarPacote`) e confere tamanho e sha256 (`conferirPacote`) | `sem_internet`, `pacote_recusado` |
+| 6 | extrai em `.<pasta>.instalando`, ao lado da pasta (`extrairPacote`, que recusa `..`, caminho absoluto, link e caminho fora da lista de troca) | `pacote_recusado` |
+| 7 | numa Secretária, roda `bun secretaria parar --json` nela, sem mostrar a saída; saída que não é 0 nem 4 vira um aviso, e a troca segue | |
+| 8 | numa Secretária, leva cada entrada da pasta, menos `meu/`, para `<pasta>-antes-AAAA-MM-DD-HHMMSS`, ao lado dela; depois traz cada entrada extraída | `troca_falhou`, com cada rename desfeito na ordem inversa |
+| 9 | cria o que falta do esqueleto de `meu/`, sem tocar no que existe, e copia `.claude/settings.local.json` da pasta guardada | |
+| 10 | roda `bun install --frozen-lockfile`, `bun secretaria instalar` e `bun secretaria abrir` na pasta | o script sai com a saída do comando |
+
+Recusa até o passo 6 não cria nada: a pasta extraída sai no fim, com ou sem erro. A recusa imprime a frase para o vendedor e a linha `Para o suporte: <motivo> (<detalhe>)`, e o script sai com 1. Enquanto não há release publicada, o endereço responde 404 (seção "Descoberta de versão nova"), e o script diz que ainda não existe versão publicada, sem instalar da `main`.
+
+A troca renomeia entrada por entrada, e não a pasta inteira: no Windows, a pasta atual do terminal ou do agente não se renomeia, mas o que está dentro dela, sim. O rename recusado com `EPERM`, `EBUSY` ou `EACCES` no Windows ganha as mesmas novas tentativas do atualizador. Nada é apagado: a pasta guardada fica até o vendedor apagar, com o `.git` de quem instalou por `git clone`, e a volta só apaga a pasta guardada que ficou vazia. Os dados moram na pasta de dados, fora da troca.
+
+### Teste da instalação
+
+`nucleo/atualizacao/instalacao.test.ts` roda o instalador no processo do teste, contra a release falsa: pasta nova, sem release, sem internet, 429, chave desconhecida (sem baixar o pacote), pacote adulterado, Bun mínimo, por cima de um clone antigo (para a Secretária, guarda a pasta com o `.git`, mantém `meu/` e as permissões locais), mesma versão sem novo download, versão mais nova, pasta de outra coisa e uma troca que falha no quinto rename e volta, pasta por pasta, ao que era. `testes/conferencias/entrada.test.ts` roda o `instalar.sh` com um `bun` e um `curl` falsos e confere que o arquivo que o `bun` recebe é o bloco, sem nada expandido, com a pasta pedida, e que a pasta temporária some.
+
+`testes/instalacao/pelo-script.ts` é a prova de ponta a ponta, que o job `instalacao` do CI roda no Ubuntu, no macOS e no Windows, ao lado do `nucleo`. Ela monta dois pacotes deste checkout pelo `montarPacote`, a versão do `package.json` e a seguinte maior, com a fonte das versões do código empacotado apontada para a release falsa. O script de verdade, com o bloco montado para a release falsa (`scriptsComOInstalador` com `FonteDeTeste`), instala a primeira por cima de uma pasta que era um clone, num caminho com espaço e acento: `sh` no Linux e no macOS, `powershell -File` (o 5.1) no Windows. As dependências vêm do npm, o `instalar` e o `abrir` são os de verdade, e o cofre fica em arquivo. Depois, uma aba do painel clica em Atualizar, e a prova espera o atualizador gravar `concluido` com a versão nova no ar. Ela fica fora do `bun test`. No Linux, com o cache do Bun quente, ela levou 2,1 s (medido com `time`, em 15 de novembro de 2026).
+
+Não verificado: a prova no macOS e no Windows (só o CI roda), o `curl ... | sh` e o `irm ... | iex` pelo endereço do `raw.githubusercontent.com`, e a troca com um antivírus de verdade segurando arquivo.
+
+### Os passos do `instalar`
+
+O `bun secretaria instalar`, que o instalador roda no fim, é a lista `PASSOS` em `nucleo/instalador/passos.ts`: `bun`, `dependencias`, `pasta_dados`, `wacli`, `banco`, `cofre`, `skills`, `saude`. Cada passo tem `verificar`, que não muda nada, e `aplicar`, que só roda quando falta algo. Rodar duas vezes devolve `ja_estava` em tudo.
 
 O wacli vem de `ferramentas.lock.json`: URL e sha256 por plataforma, copiados do `checksums.txt` do release. O download vai para um arquivo `.baixando-*`, o sha256 é conferido, o executável é extraído no próprio processo (`Bun.Archive` para `.tar.gz`, leitor de zip próprio para o Windows), roda `--version`, e só então entra em `<dados>/bin` por `rename`. O passo `skills` gera `.claude/skills` a partir de `.agents/skills` e `meu/skills`, sem symlink.
 

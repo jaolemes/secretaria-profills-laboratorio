@@ -7,7 +7,7 @@ import { recusar, type Recusa } from "./recusa";
  */
 
 /** O repo é público: fork, espelho ou manifesto com outra URL não levam a Secretária a baixar de outro lugar. */
-const ORIGEM_DAS_VERSOES = "https://github.com/profillsbrasil/secretaria-profills/releases/";
+export const ORIGEM_DAS_VERSOES ="https://github.com/profillsbrasil/secretaria-profills/releases/";
 
 /** Arquivo anexado à última release que não é de teste. Não é a API do GitHub e não pede conta. */
 export const ENDERECO_DA_ULTIMA_VERSAO = `${ORIGEM_DAS_VERSOES}latest/download/versao.json`;

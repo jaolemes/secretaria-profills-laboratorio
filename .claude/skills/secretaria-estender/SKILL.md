@@ -14,7 +14,7 @@ O repo tem dois donos.
 
 | Pasta | Dono | Quem muda |
 |---|---|---|
-| `nucleo/` | Profills. Chega nas atualizações. | Só a Profills. Mudança local conflita na próxima atualização. |
+| `nucleo/` | Profills. Chega nas atualizações. | Só a Profills. Mudança local sai do ar na próxima atualização: fica uma cópia, e o painel avisa quantos arquivos eram. |
 | `meu/` | O vendedor. A atualização nunca mexe. | Você, a pedido do vendedor. |
 
 Leia `meu/AGENTS.md` antes: são as regras dele.

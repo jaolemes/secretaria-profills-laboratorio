@@ -75,6 +75,14 @@ describe("workflows do GitHub", () => {
   });
 });
 
+describe("CI", () => {
+  test("a instalação pelo script e a atualização pelo botão rodam nos três sistemas", () => {
+    const job = workflows.get("ci.yml")?.jobs.instalacao;
+    expect(job?.strategy?.matrix?.os).toEqual(["ubuntu-latest", "macos-latest", "windows-latest"]);
+    expect(job?.steps.map((passo) => passo.run)).toContain("bun testes/instalacao/pelo-script.ts");
+  });
+});
+
 describe("workflow de release", () => {
   const release = workflows.get("release.yml");
 

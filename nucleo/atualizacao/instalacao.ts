@@ -221,7 +221,11 @@ export async function instalarPelaVersao(opcoes: OpcoesDaInstalacao): Promise<De
     }
     return { tipo: "instalada", versao: manifesto.versao, guardada };
   } finally {
-    rmSync(extraida, { recursive: true, force: true });
+    try {
+      rmSync(extraida, { recursive: true, force: true });
+    } catch {
+      // No Windows, um arquivo preso segura a pasta; a próxima rodada a apaga antes de extrair.
+    }
   }
 }
 

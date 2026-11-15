@@ -603,7 +603,9 @@ async function instalarPelaVersao(opcoes) {
     }
     return { tipo: "instalada", versao: manifesto.versao, guardada };
   } finally {
-    rmSync(extraida, { recursive: true, force: true });
+    try {
+      rmSync(extraida, { recursive: true, force: true });
+    } catch {}
   }
 }
 function resolverDestino(cwd, pedida) {

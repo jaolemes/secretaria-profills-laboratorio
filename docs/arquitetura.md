@@ -923,6 +923,20 @@ A migração do vendedor roda só em `meu.db`. Ela não enxerga tabela nem dado 
 
 O núcleo ainda não tem `nucleo/extensao.ts`, o contrato que leria páginas e comandos de `meu/`. A conferência de fronteiras já reserva esse único ponto de entrada.
 
+## Versão e novidades
+
+A versão da Secretária é o `version` do `package.json`, a mesma que `/api/info` e o `diagnostico` mostram em `versaoNucleo`. Cada versão tem um arquivo `novidades/<versão>.md` com o "O que muda" em palavras de vendedor:
+
+```
+---
+versao: 0.1.0
+data: 2026-11-14
+---
+- Uma frase curta sobre o que o vendedor ganhou.
+```
+
+`lerNovidades` (`nucleo/atualizacao/novidades.ts`, sem I/O) lê o arquivo e devolve a versão, a data e as linhas, ou a lista de problemas com o número da linha. O cabeçalho tem só `versao` (X.Y.Z) e `data` (um dia que existe, AAAA-MM-DD). O corpo tem de 1 a 5 linhas começadas por `- `, cada uma uma frase só, com maiúscula no começo, ponto no fim e até 140 caracteres, sem crase, link, nome de arquivo, caminho de pasta, comando, opção de comando nem número de PR. `testes/conferencias/novidades.test.ts` reprova a versão do `package.json` sem o arquivo dela, arquivo fora dessa regra e arquivo cujo cabeçalho diz outra versão que o nome.
+
 ## Instalação
 
 `instalar.sh` e `instalar.ps1` só garantem um Bun que atenda `engines.bun` (instalam o fixado quando falta e nunca rebaixam um mais novo) e chamam `bun install --frozen-lockfile`, `bun secretaria instalar` e `bun secretaria abrir`. O resto é a lista `PASSOS` em `nucleo/instalador/passos.ts`: `bun`, `dependencias`, `pasta_dados`, `wacli`, `banco`, `cofre`, `skills`, `saude`. Cada passo tem `verificar`, que não muda nada, e `aplicar`, que só roda quando falta algo. Rodar duas vezes devolve `ja_estava` em tudo.

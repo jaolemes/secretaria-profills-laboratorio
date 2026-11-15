@@ -955,7 +955,7 @@ data: 2026-11-14
 
 ## Pacote da versão e assinatura
 
-Cada versão marcada sai como dois arquivos anexados à release do GitHub: `secretaria-<versão>.tar.gz`, o pacote, e `versao.json`, o manifesto assinado. O código que monta, assina, confere e extrai mora em `nucleo/atualizacao` e usa só o Bun, sem pacote do npm: o passo que assina roda sem `bun install`. `testes/conferencias/release.test.ts` reprova um import de fora nesse módulo. Nesta versão o servidor só confere o `versao.json` (seção "Descoberta de versão nova"): nada aparece no painel, e o pacote não é baixado.
+Cada versão marcada sai como dois arquivos anexados à release do GitHub: `secretaria-<versão>.tar.gz`, o pacote, e `versao.json`, o manifesto assinado. O código que monta, assina, confere e extrai mora em `nucleo/atualizacao` e usa só o Bun, sem pacote do npm: o passo que assina roda sem `bun install`. `testes/conferencias/release.test.ts` reprova um import de fora nesse módulo. O servidor confere o `versao.json` (seção "Descoberta de versão nova") e, no clique do vendedor, baixa o pacote, confere e extrai (seção "Aplicar a versão nova"). Nada disso aparece no painel nesta versão.
 
 ### O `versao.json`
 
@@ -1056,7 +1056,7 @@ Não verificado: o workflow ainda não rodou no GitHub. A montagem, a conferênc
 
 ## Descoberta de versão nova
 
-O servidor confere se há versão nova buscando o `versao.json` em `ENDERECO_DA_ULTIMA_VERSAO`. Quem busca é o servidor, nunca o navegador: a CSP do painel fica como está. O servidor ainda não baixa o pacote nem chama o atualizador (seção "O atualizador"), e nada disso aparece no painel.
+O servidor confere se há versão nova buscando o `versao.json` em `ENDERECO_DA_ULTIMA_VERSAO`. Quem busca é o servidor, nunca o navegador: a CSP do painel fica como está. Baixar o pacote e chamar o atualizador é da seção "Aplicar a versão nova". Nada disso aparece no painel nesta versão.
 
 ### Quando busca
 
@@ -1074,7 +1074,7 @@ A hora e o resultado da última busca ficam na tabela `conferencia_de_versao`, d
 
 ### Resultado da busca e estado
 
-`lerResposta` (`nucleo/atualizacao/descoberta.ts`, sem I/O além da assinatura) transforma a resposta num resultado, e `estadoDaAtualizacao` transforma o resultado guardado e a instalação de agora no estado que a API entrega. O estado nunca é guardado: depois de atualizar, a versão guardada deixa de ser maior e o estado volta a `em_dia` sem outra busca.
+`lerResposta` (`nucleo/atualizacao/descoberta.ts`, sem I/O além da assinatura) transforma a resposta num resultado, e `estadoDaAtualizacao` transforma o resultado guardado e a instalação de agora no `EstadoDaDescoberta`. A API entrega esse estado junto com a atualização em curso e o que está ocupado (`juntarEstado`, seção "Aplicar a versão nova"). O estado nunca é guardado: depois de atualizar, a versão guardada deixa de ser maior e o estado volta a `em_dia` sem outra busca.
 
 | Resposta | Resultado guardado | Estado | Registro |
 |---|---|---|---|
@@ -1096,26 +1096,80 @@ O 404 conta como "nada novo", e não como sem internet: medido em 14 de novembro
 |---|---|
 | `nao_conferida` | `instalada` |
 | `em_dia` | `instalada`, `conferidaEm` |
-| `versao_nova` | `instalada`, `conferidaEm`, `nova` (`versao`, `data`, `bunMinimo`, `oQueMuda`) e `impedimento` |
+| `versao_nova` | `instalada`, `conferidaEm`, `nova` (`versao`, `data`, `bunMinimo`, `oQueMuda`), `impedimento` e `bloqueio` |
 | `sem_internet` | `instalada`, `tentadaEm` |
+| `atualizando` | `instalada`, `para`, `passo` |
+| `atualizado` | `instalada`, `de`, `nucleoMudado`, `em` |
+| `falhou` | `instalada`, `para`, `motivo`, `explicacao`, `em`, `nova` e `bloqueio` |
 
-`impedimento` diz por que a versão nova não se aplica nesta máquina: `instalacao_de_desenvolvimento` quando a pasta tem `.git` (a pasta de desenvolvimento nunca se atualiza pelo painel, e quem instalou por `git clone` reinstala uma vez pelo script), `bun_antigo` quando o `bunMinimo` do manifesto é maior que o Bun que roda o servidor, e `null` quando nada impede. Os estados `atualizando`, `atualizado` e `falhou` chegam com o aplicar.
+`impedimento` diz por que a versão nova não se aplica nesta máquina: `instalacao_de_desenvolvimento` quando a pasta tem `.git` (a pasta de desenvolvimento nunca se atualiza pelo painel, e quem instalou por `git clone` reinstala uma vez pelo script), `bun_antigo` quando o `bunMinimo` do manifesto é maior que o Bun que roda o servidor, e `null` quando nada impede. `bloqueio` junta o impedimento ao que está ocupado agora, com a explicação em palavras de vendedor; os três últimos estados são da seção seguinte.
 
-O agente recebe cada frase de `oQueMuda` citada como dado, com `detalheComoDado`: o texto veio da rede, mesmo assinado. O painel recebe as frases como estão. O `diagnostico` leva só `atualizacao: { fase, versaoNova, impedimento, ultimaConferencia }`, sem o O que muda.
+O agente recebe cada frase de `oQueMuda` citada como dado, com `detalheComoDado`, em `versao_nova` e em `falhou`: o texto veio da rede, mesmo assinado. O painel recebe as frases como estão. O `diagnostico` leva só `atualizacao: { fase, versaoNova, impedimento, ultimaConferencia }`, sem o O que muda. `versaoNova` é a versão nova, a que está sendo aplicada ou a que falhou; `impedimento` e `ultimaConferencia` vêm da descoberta.
 
 ### Teste
 
 `testes/falsos/release.ts` é a release falsa: serve o `versao.json` assinado por uma chave gerada na hora, um status sem corpo, um corpo cru ou um pedido que nunca responde, e conta os pedidos. O servidor recebe o endereço, as chaves e o prazo por `OpcoesDoServidor.versoes`, que só o teste passa; não é campo do `ambiente.json`. O palco aponta, por padrão, para uma porta morta: nenhum teste fala com o GitHub. `nucleo/atualizacao/descoberta.test.ts` cobre cada linha da tabela de resultado. `testes/servidor/atualizacao.test.ts` e `testes/cli/atualizacao.test.ts` cobrem, contra a release falsa, versão maior, igual e menor, chave desconhecida, corpo grande, prazo vencido, 429, o `.git`, o Bun mínimo, o intervalo de 6 horas com restart no meio, o intervalo de 30 s do agente e a busca única de dois pedidos.
 
+## Aplicar a versão nova
+
+`POST /api/atualizacao/aplicar` é o clique do vendedor no botão Atualizar. Só a sessão do painel aplica: o Bearer do agente recebe `so_no_painel`, e o CLI não tem o comando. Como no resto, isso guarda contra erro do agente e não é fronteira (seção "O que é fronteira e o que não é"). O botão chega ao painel na tela da atualização; nesta versão, nada aparece nele.
+
+`criarAplicador` (`nucleo/servidor/aplicacao.ts`) é dono do clique. O estado que `GET /api/atualizacao`, o `diagnostico` e o SSE entregam sai de `juntarEstado` (`nucleo/atualizacao/aplicacao.ts`, sem I/O), com três entradas: o `EstadoDaDescoberta`, a `Aplicacao` (a deste processo ou o fim que o atualizador gravou) e a lista do que está ocupado agora.
+
+### O que segura o botão
+
+Em `versao_nova` e em `falhou`, `bloqueio` diz por que agora não dá, com `motivo` e `explicacao`. O impedimento da máquina vem primeiro; depois, o que se perderia num restart:
+
+| `motivo` | Quando |
+|---|---|
+| `instalacao_de_desenvolvimento`, `bun_antigo` | o `impedimento` da descoberta. `bun_antigo` explica "Esta versão pede uma atualização do instalador. Peça ao seu agente." |
+| `gravando_no_crm` | algum cartão em `gravando` |
+| `sincronizando` | uma rodada entre o `comecou` e o `terminou` de `assinarSincronizacao` |
+| `whatsapp_conectando`, `crm_conectando`, `email_testando` | o conector, ou uma conta, numa fase fora de `FASES_DURAVEIS` (`pareando`, `sincronizando`, `confirmar_conta`, `autorizando`, `testando`) |
+
+Com bloqueio, o clique responde `atualizacao_bloqueada` (409) com o estado em `erro.atual`. Sem versão nova, `sem_versao_nova` (409). Com o `andamento.json` de uma atualização que não chegou ao fim, `atualizacao_em_andamento` (409).
+
+### Os passos no servidor
+
+O clique responde na hora com `atualizando`, `passo: "baixando"`. O estado muda antes da primeira espera: o segundo clique, ou o de outra aba, recebe o mesmo `atualizando` e não começa outra. Cada mudança de passo sai pelo SSE como `event: atualizacao`, com o estado inteiro; o agente recebe o O que muda citado como dado.
+
+| `passo` | O que o servidor faz |
+|---|---|
+| `baixando` | guarda a sessão da aba que clicou como a que o servidor seguinte aceita (`guardarParaORestart`); busca o `versao.json` de novo e confere a assinatura, que a versão é a mesma que o vendedor viu e o Bun mínimo; baixa o pacote da URL do manifesto, até o tamanho dele, em até 10 min; confere tamanho e sha256 (`conferirPacote`); apaga `.atualizacao/nova/` e só então extrai nela (`extrairPacote`) |
+| `instalando` | `bun install --frozen-lockfile --cwd .atualizacao/nova` pelo supervisor, em até 15 min: toda a rede das dependências acontece com o servidor no ar |
+| `reiniciando` | confere de novo o que está ocupado; com a `trava.db` na mão, confere que não há atualização pendente e grava o `andamento.json` em `preparado`; solta a trava; sobe destacado `bun .atualizacao/nova/nucleo/atualizador/main.ts --repo <raiz> --dados <pasta de dados>`, com a saída em `<dados>/logs/atualizador.log`; espera o andamento sair de `preparado`, até 15 s; e pede a própria parada |
+
+O servidor só para depois de o atualizador tomar a trava e gravar `esperar_banco`. Se o andamento segue em `preparado` e a trava está livre, o atualizador não começou: o servidor apaga o `andamento.json`, fica no ar e entra em `falhou` com `atualizador_nao_comecou`.
+
+Falha antes da parada deixa o servidor no ar, em `falhou`, com o motivo: `sem_internet` (o `versao.json` ou o pacote não chegou), `versao_mudou` (a versão publicada mudou, ou pede outro Bun; dispara uma conferência), `pacote_recusado` (sha256, tamanho ou extração), `dependencias_falharam`, `ficou_ocupada` (algo começou no meio, ou outro processo segurava a trava) e `atualizador_nao_comecou`. `falhou` traz `nova` e `bloqueio`: o Tentar de novo é outro clique.
+
+### Depois do restart
+
+O servidor que sobe lê o `andamento.json` a cada estado, sem guardar nada. O fim gravado vale para ele quando foi gravado até 10 minutos antes da subida, ou depois dela:
+
+| Andamento | Estado |
+|---|---|
+| `concluido`, com `para` igual à versão deste servidor | `atualizado`, com `de` e `nucleoMudado` (`mudados.quantos`, ou `null` sem lista) |
+| `desfeito` com `falha`, com `de` igual à versão deste servidor | `falhou`, com o `motivo` do atualizador e a explicação dele |
+| outro, ou mais velho | o estado da descoberta |
+
+O atualizador grava `concluido` só depois de `/api/info` do servidor novo responder a versão nova. Até lá o andamento está em `subir` e o estado é o da descoberta; como o servidor relê o andamento a cada pedido, o `atualizado` aparece sem outro restart.
+
+### Teste
+
+`testes/servidor/aplicar.test.ts` cobre, contra a release falsa e o palco: `so_no_painel` para o Bearer, sem nada baixado; `sem_versao_nova`; o bloqueio com `.git`, com Bun antigo, com o WhatsApp `pareando`, com um cartão em `gravando` (o CRM falso segura a gravação) e com uma sincronização rodando; o pacote que não chega, o adulterado (nada extraído) e as dependências que não instalam; o atualizador que não começa; dois cliques e uma segunda aba, com um download só e o passo pelo SSE; e a leitura do `andamento.json` depois do restart, dentro e fora dos 10 minutos.
+
+`testes/fluxos/aplicar-atualizacao.test.ts` roda a troca inteira: uma instalação de teste da 0.1.0 nasce do pacote numa pasta temporária, com a pasta de dados do palco e o WhatsApp falso conectado. O `nucleo/cli/main.ts` dela é `testes/falsos/secretaria-de-verdade.ts`, que sobe o servidor de verdade deste repo dizendo a versão do `package.json` da instalação (`OpcoesDoServidor.versaoDoNucleo`, só do teste). A release falsa publica a 0.2.0. O clique no servidor da 0.1.0 baixa, instala, sobe o atualizador real que veio na 0.2.0 e para; o atualizador troca a pasta e sobe o servidor da 0.2.0. A aba que clicou entra no servidor novo e vê `atualizado` com `nucleoMudado: 0`; a outra aba recebe 401. O WhatsApp volta a `conectado` com um pareamento só, o do começo.
+
 ## O atualizador
 
-`nucleo/atualizador/main.ts` troca o código da instalação pela versão nova, com o servidor parado, e volta sozinho se algo falhar. Nenhuma rota o chama ainda: baixar o pacote, extrair em `.atualizacao/nova/`, instalar as dependências lá e subir o atualizador é o passo seguinte do servidor.
+`nucleo/atualizador/main.ts` troca o código da instalação pela versão nova, com o servidor parado, e volta sozinho se algo falhar. Quem o sobe é o passo `reiniciando` do servidor (seção "Aplicar a versão nova").
 
 O contrato com esse passo do servidor:
 
 - O servidor só extrai em `.atualizacao/nova/` o pacote cuja assinatura do `versao.json` e cujo sha256 ele conferiu (`conferirPacote`), e só pela extração de `nucleo/atualizacao`, que recusa `..`, caminho absoluto, link e caminho fora da lista de troca.
 - Só depois disso ele roda `bun install --frozen-lockfile` dentro de `nova/` e sobe o `main.ts` de `nova/`. Nada de `nova/` roda antes da conferência.
-- Ele segura a `trava.db` antes de gravar o `andamento.json` em `preparado`. Sem isso, um `abrir` entre a gravação e o início do atualizador acha o `preparado` sem dono, grava `desfeito` e sobe o servidor antigo enquanto o atualizador ainda vai começar.
+- Ele segura a `trava.db` enquanto grava o `andamento.json` em `preparado`, solta antes de subir o atualizador e só para depois de o atualizador tomá-la. Sem isso, um `abrir` entre a gravação e o início do atualizador acha o `preparado` sem dono, grava `desfeito` e sobe o servidor antigo enquanto o atualizador ainda vai começar.
 
 ```
 bun .atualizacao/nova/nucleo/atualizador/main.ts --repo <raiz da instalação> --dados <pasta de dados>

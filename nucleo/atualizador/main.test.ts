@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import type { Database } from "bun:sqlite";
+import { Database } from "bun:sqlite";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { abrirExclusivo } from "../banco/abrir";
 import { migrarInstalacao, montarInstalacao, retratoDaPasta, type InstalacaoMinima } from "../../testes/falsos/instalacao-minima";
 import {
   FASES,
@@ -88,6 +87,16 @@ function andamentoNoDisco(): Andamento {
   const lido = lerAndamento(caminhosDoAtualizador(instalacao.raiz, instalacao.dirDados).andamento);
   if (lido.tipo !== "lido") throw new Error(`o andamento está ${lido.tipo}`);
   return lido.andamento;
+}
+
+/** Segura a trava como um atualizador vivo segura: SQLite em modo exclusivo. */
+function segurarATrava(): void {
+  const trava = new Database(caminhosDoAtualizador(instalacao.raiz, instalacao.dirDados).trava, { create: true });
+  trava.run("PRAGMA locking_mode = EXCLUSIVE");
+  trava.run("PRAGMA journal_mode = WAL");
+  trava.run("BEGIN IMMEDIATE");
+  trava.run("COMMIT");
+  abertos.push(trava);
 }
 
 function fecharServidores(): void {
@@ -409,7 +418,7 @@ describe("recompor a pasta antes de carregar o CLI", () => {
   test("com a trava segura por outro processo, ou numa pasta com .git, não move nada", async () => {
     instalacao = montarInstalacao();
     nucleoForaDoLugar();
-    abertos.push(abrirExclusivo(caminhosDoAtualizador(instalacao.raiz, instalacao.dirDados).trava));
+    segurarATrava();
     expect(await recomporArvore(instalacao.raiz)).toEqual({ tipo: "em_andamento" });
     fecharServidores();
 

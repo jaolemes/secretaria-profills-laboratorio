@@ -951,6 +951,107 @@ data: 2026-11-14
 
 `lerNovidades` (`nucleo/atualizacao/novidades.ts`, sem I/O) lê o arquivo e devolve a versão, a data e as linhas, ou a lista de problemas com o número da linha. O cabeçalho tem só `versao` (X.Y.Z) e `data` (um dia que existe, AAAA-MM-DD). O corpo tem de 1 a 5 linhas começadas por `- `, cada uma uma frase só, com maiúscula no começo, ponto no fim e até 140 caracteres, sem crase, link, nome de arquivo, caminho de pasta, comando, opção de comando nem número de PR. `testes/conferencias/novidades.test.ts` reprova a versão do `package.json` sem o arquivo dela, arquivo fora dessa regra e arquivo cujo cabeçalho diz outra versão que o nome.
 
+## Pacote da versão e assinatura
+
+Cada versão marcada sai como dois arquivos anexados à release do GitHub: `secretaria-<versão>.tar.gz`, o pacote, e `versao.json`, o manifesto assinado. O código que monta, assina, confere e extrai mora em `nucleo/atualizacao` e usa só o Bun, sem pacote do npm: o passo que assina roda sem `bun install`. `testes/conferencias/release.test.ts` reprova um import de fora nesse módulo. Nesta versão nada disso aparece no painel nem baixa nada: o servidor ainda não chama essas funções.
+
+### O `versao.json`
+
+```json
+{
+  "manifesto": "{\"v\":1,\"versao\":\"0.2.0\",\"data\":\"2026-11-20\",\"bunMinimo\":\"1.4.4\",\"pacote\":{\"url\":\"https://github.com/profillsbrasil/secretaria-profills/releases/download/v0.2.0/secretaria-0.2.0.tar.gz\",\"sha256\":\"<64 hex>\",\"bytes\":944772},\"oQueMuda\":[\"...\"]}",
+  "chave": "<id da chave>",
+  "assinatura": "<Ed25519 dos bytes de manifesto, em base64>"
+}
+```
+
+O manifesto viaja como texto dentro do envelope, e a assinatura cobre exatamente esses bytes. `chave` são os 16 primeiros caracteres hexadecimais do sha256 da chave pública. `oQueMuda` são as linhas de `novidades/<versão>.md`, e `bunMinimo` vem de `engines.bun`.
+
+`conferirVersaoPublicada` (`envelope.ts`) é a porta de entrada de uma versão publicada. Ela devolve o manifesto ou uma recusa com um destes motivos, nesta ordem:
+
+| Motivo | Quando |
+|---|---|
+| `envelope_invalido` | o arquivo não é JSON com `manifesto`, `chave` e `assinatura` em texto, ou passa de 64 KiB |
+| `chave_desconhecida` | o id não é de nenhuma chave de `CHAVES_PUBLICAS` (`chaves.ts`) |
+| `assinatura_invalida` | a assinatura não é desse manifesto, com essa chave |
+| `manifesto_invalido` | falta campo, o formato não é `v: 1`, versão fora de X.Y.Z, sha256 fora de 64 hexadecimais, tamanho fora de 1 a 64 MiB, ou `oQueMuda` fora de 1 a 5 frases de até 140 caracteres |
+| `endereco_fora_do_canonico` | a URL do pacote não é, letra por letra, `https://github.com/profillsbrasil/secretaria-profills/releases/download/v<versão>/secretaria-<versão>.tar.gz` |
+| `versao_nao_e_maior` | a versão publicada é igual ou menor que a instalada, pela ordem numérica de cada parte |
+
+O manifesto só é lido depois que a assinatura confere. Campo a mais no manifesto é ignorado, para o manifesto poder crescer sem prender quem está numa versão antiga; mudança que quebra sobe o `v`. O endereço do `versao.json` da última versão é fixo no código (`ENDERECO_DA_ULTIMA_VERSAO`, em `manifesto.ts`), como o do wacli: não é campo do `ambiente.json`.
+
+### O pacote
+
+O pacote é um `.tar.gz` no formato ustar, escrito e lido por `tar.ts`. Ele traz só arquivo comum, sem data nem dono, na ordem dos caminhos: o mesmo repo dá os mesmos bytes. O primeiro arquivo é `arquivos-da-versao.json`, a lista de tudo o que o pacote traz, com o sha256 e o tamanho de cada arquivo. A extração grava essa lista na raiz da instalação, e é por ela que a atualização seguinte vai saber o que a Profills entregou, o que o agente do vendedor mudou e o que saiu de uma versão para a outra.
+
+A lista de troca diz o que entra no pacote (`entraNaTroca`, em `pacote.ts`):
+
+| Entra | Fica de fora |
+|---|---|
+| `nucleo/`, `docs/`, `testes/`, `novidades/` | `meu/`, inteiro |
+| arquivos da raiz | `node_modules/`, `.git/`, `.github/`, `.atualizacao/` |
+| `.agents/skills/<skill da Profills>/` | `.agents/skills/meu-*/` e `.claude/skills/`, que o passo `skills` do instalador gera |
+| `.claude/settings.json` | `.claude/settings.local.json` |
+
+A mesma regra vale nas duas pontas. `montarPacote` pula o que está fora da lista e lança erro para link, pasta e caminho da lista que não serve nos três sistemas. `extrairPacote` recusa o pacote inteiro, sem gravar nada, nestes casos:
+
+| Motivo | Quando |
+|---|---|
+| `pacote_nao_confere` | (em `conferirPacote`) o tamanho ou o sha256 dos bytes não é o do manifesto |
+| `pacote_invalido` | não é gzip, passa de 256 MiB aberto, ou o tar está cortado, com soma errada ou fora do ustar |
+| `caminho_recusado` | entrada que não é arquivo comum (link simbólico, link físico, pasta, dispositivo, cabeçalho estendido); caminho absoluto, com `..`, `.`, barra invertida, dois-pontos, espaço ou letra fora de `A-Z a-z 0-9 . _ -`; nome que termina em ponto ou que o Windows reserva; caminho fora da lista de troca; dois caminhos que só mudam na caixa; arquivo com nome de pasta |
+| `lista_nao_confere` | falta `arquivos-da-versao.json`, ela é de outra versão que o manifesto, ou os arquivos e os sha256 do pacote não são os da lista |
+
+`extrairPacote` só aceita um `PacoteConferido`, que só `conferirPacote` cria: não há como extrair bytes que não passaram pelo sha256 do manifesto. O destino precisa não existir ou estar vazio, e a extração confere todas as entradas antes de gravar o primeiro byte. O bit de execução do `instalar.sh` volta no Linux e no macOS.
+
+O pacote não leva `meu/`. Uma pasta extraída do pacote não tem `meu/AGENTS.md` nem `meu/README.md`: quem instalar do zero pelo pacote precisa criar esse esqueleto.
+
+### Chaves de assinatura
+
+`CHAVES_PUBLICAS` (`nucleo/atualizacao/chaves.ts`) tem lugar para duas chaves Ed25519, cada uma com os 32 bytes da chave pública em base64. A lista está vazia: enquanto estiver, toda versão publicada é recusada com `chave_desconhecida`, e o workflow de release não assina.
+
+| Papel | Onde fica a chave privada | Assina |
+|---|---|---|
+| `ativa` | segredo `SECRETARIA_CHAVE_DE_ASSINATURA` do ambiente `release` do GitHub Actions | toda versão |
+| `reserva` | fora do GitHub, com o dono | só a versão que troca a ativa |
+
+O dono gera as duas no terminal dele, com o arquivo fora da pasta do repo:
+
+```
+bun nucleo/atualizacao/release.ts gerar-chave ~/secretaria-chave-ativa
+bun nucleo/atualizacao/release.ts gerar-chave ~/secretaria-chave-reserva
+```
+
+Cada comando grava a chave privada (PKCS8 em base64) no arquivo, só com leitura do dono, e imprime a linha da chave pública. O comando recusa arquivo que já existe e arquivo dentro do repo. A chave privada não aparece no terminal. Depois:
+
+1. As duas linhas entram em `CHAVES_PUBLICAS`, a segunda com `papel: "reserva"`, por PR. Chave pública não é segredo.
+2. No GitHub, em Settings, Environments, o dono cria o ambiente `release`, põe a si mesmo em Required reviewers, desmarca a opção que deixa administrador pular a regra e limita Deployment branches and tags à tag `v*`.
+3. O dono cadastra o segredo do ambiente, sem a chave passar por chat nem por arquivo do repo: `gh secret set SECRETARIA_CHAVE_DE_ASSINATURA --env release --repo profillsbrasil/secretaria-profills < ~/secretaria-chave-ativa`.
+4. O arquivo da chave reserva vai para fora do computador de trabalho (gerenciador de senhas ou mídia guardada), e o da ativa é apagado: a cópia dela é o segredo do ambiente.
+5. Em Settings, Rules, uma regra de tag para `v*` restringe criar, mover e apagar ao dono. Em Settings, General, Releases, a release imutável impede trocar um anexo depois de publicado.
+
+Trocar a chave ativa: o dono gera um par novo, o PR da versão põe a pública nova em `CHAVES_PUBLICAS` no lugar da antiga, e essa versão é assinada com a reserva, cadastrada no segredo só para essa release. As instalações aceitam, porque já conhecem a reserva. Depois o segredo recebe a ativa nova, e uma reserva nova entra na versão seguinte.
+
+Limite: quem toma a conta do GitHub do dono aprova o ambiente e assina. A assinatura segura rede adulterada, espelho e quem só tem escrita no repo.
+
+### Workflow de release
+
+`.github/workflows/release.yml` roda quando uma tag `v*` chega. `bun nucleo/atualizacao/release.ts` tem um comando por passo, e cada comando lança erro em vez de publicar algo que a Secretária instalada recusaria.
+
+| Job | Onde | Permissão | Faz |
+|---|---|---|---|
+| `montar` | Ubuntu | `contents: read` | confere que a tag (`vX.Y.Z` ou `vX.Y.Z-teste`), o `package.json` e `novidades/<versão>.md` dizem a mesma versão, que a tag que não é de teste está na `main`, e monta o pacote, o manifesto sem assinatura e as notas |
+| `conferir` | Ubuntu, macOS e Windows | `contents: read` | confere o sha256, extrai o pacote e roda `bun install --frozen-lockfile` e `bun run tipos` na pasta extraída |
+| `publicar` | Ubuntu, ambiente `release` | `contents: write` | espera a aprovação do dono, monta tudo de novo a partir do checkout e só assina se o pacote e o manifesto testados forem, byte a byte, os que ele montou; confere a assinatura com `CHAVES_PUBLICAS`; cria a release com `versao.json` e o pacote |
+
+O topo do workflow não dá permissão nenhuma, toda ação é fixada pelo SHA do commit, todo job tem prazo, e nenhum comando recebe expressão do GitHub dentro do texto: a tag entra por variável de ambiente. Só o job `publicar` vê o segredo e escreve no repo. `testes/conferencias/release.test.ts` cobra essas regras em todos os workflows.
+
+Para publicar uma versão, o PR da versão sobe o `version` do `package.json` e traz o `novidades/<versão>.md`. Depois do merge, o dono cria a tag `v<versão>` no commit da `main` e aprova o job `publicar`.
+
+A tag `vX.Y.Z-teste` publica uma release de teste: sai marcada como pré-release, o endereço da última versão não a enxerga, e o manifesto dela aponta para a própria tag, que nenhuma instalação aceita (`endereco_fora_do_canonico`). Ela serve para ver o workflow rodar nos três sistemas, e também precisa da aprovação e da chave.
+
+Não verificado: o workflow ainda não rodou no GitHub. A montagem, a conferência, a assinatura com chave de teste e o `bun install` e o `tipos` na pasta extraída rodaram no Linux, pelos testes e pelo comando.
+
 ## Instalação
 
 `instalar.sh` e `instalar.ps1` só garantem um Bun que atenda `engines.bun` (instalam o fixado quando falta e nunca rebaixam um mais novo) e chamam `bun install --frozen-lockfile`, `bun secretaria instalar` e `bun secretaria abrir`. O resto é a lista `PASSOS` em `nucleo/instalador/passos.ts`: `bun`, `dependencias`, `pasta_dados`, `wacli`, `banco`, `cofre`, `skills`, `saude`. Cada passo tem `verificar`, que não muda nada, e `aplicar`, que só roda quando falta algo. Rodar duas vezes devolve `ja_estava` em tudo.

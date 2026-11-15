@@ -44,6 +44,7 @@ import { abrirNoNavegador } from "./navegador";
 
 const PRAZO_PADRAO_MS = 180_000;
 const PARADA_MS = 15_000;
+const LOCK_DO_BANCO_MS = 10_000;
 /** A rodada do servidor tem prazo de 2 min; o CLI espera um pouco mais para receber o resultado dela. */
 const PRAZO_DA_SINCRONIZACAO_MS = 150_000;
 /** A leitura do CRM no servidor para em 60 s; o CLI espera um pouco mais para receber o relatório. */
@@ -209,6 +210,10 @@ async function forcarParada(ambiente: Ambiente): Promise<Resultado<{ parado: tru
     }
     rmSync(caminhos.pid, { force: true });
     rmSync(caminhos.servidor, { force: true });
+    // O Windows solta o lock do banco depois que o processo morto some: `parado` só vale com o banco livre.
+    if (!(await esperarAte(() => !bancoEmUso(caminhos.banco) && !bancoEmUso(caminhos.bancoDoVendedor), LOCK_DO_BANCO_MS))) {
+      return falha("banco_preso_por_outro", `O servidor (pid ${anotado.pid}) foi encerrado, e o banco seguiu em uso por ${LOCK_DO_BANCO_MS / 1000} s.`);
+    }
     return ok({ parado: true, forcado: true });
   }
   rmSync(caminhos.pid, { force: true });

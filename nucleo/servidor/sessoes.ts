@@ -13,6 +13,11 @@ export interface Sessoes {
   /** Troca o bilhete pelo valor do cookie `Set-Cookie`, ou `null` se ele já foi usado ou venceu. */
   trocarBilhete(bilhete: string): Promise<string | null>;
   valida(cookies: string | null): boolean;
+  /**
+   * Faz desta sessão a guardada no cofre, a única que o servidor seguinte aceita. É a aba que pediu
+   * a atualização: as outras pedem entrada nova depois do restart. `false` quando o cookie não vale.
+   */
+  guardarParaORestart(cookies: string | null): Promise<boolean>;
 }
 
 function aleatorio(): string {
@@ -61,15 +66,24 @@ export async function criarSessoes(cofre: Cofre, agora: () => number = Date.now)
         maxAge: VIDA_DA_SESSAO_MS / 1000,
       }).serialize();
     },
-    valida(cookies) {
-      if (cookies === null) return false;
-      const valor = new Bun.CookieMap(cookies).get(NOME_DO_COOKIE);
-      if (valor === null || valor === "") return false;
-      const recebida = Segredo.de(valor);
-      // Sem atalho no primeiro acerto: a conta de comparações não depende de qual sessão bateu.
-      const emitida = emitidas.map((sessao) => sessao.igual(recebida)).includes(true);
-      const venceEm = vencimentoDe(valor);
-      return emitida && venceEm !== null && agora() < venceEm;
+    valida: (cookies) => sessaoValida(cookies) !== null,
+    async guardarParaORestart(cookies) {
+      const sessao = sessaoValida(cookies);
+      if (sessao === null) return false;
+      await cofre.gravar("servidor.chave_de_sessao", sessao);
+      return true;
     },
   };
+
+  function sessaoValida(cookies: string | null): Segredo | null {
+    if (cookies === null) return null;
+    const valor = new Bun.CookieMap(cookies).get(NOME_DO_COOKIE);
+    if (valor === null || valor === "") return null;
+    const recebida = Segredo.de(valor);
+    // Sem atalho no primeiro acerto: a conta de comparações não depende de qual sessão bateu.
+    const iguais = emitidas.map((sessao) => sessao.igual(recebida));
+    const venceEm = vencimentoDe(valor);
+    if (!iguais.includes(true) || venceEm === null || agora() >= venceEm) return null;
+    return emitidas[iguais.indexOf(true)] ?? null;
+  }
 }
